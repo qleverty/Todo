@@ -1,6 +1,6 @@
 use std::env;
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
@@ -23,7 +23,8 @@ fn main() {
     enable_ansi_support();
     
     if let Err(e) = run() {
-        eprintln!("Error: {}", e);
+        print!("\x1b[38;2;255;50;50mError\x1b[0m\x1b[38;2;255;255;255m:\x1b[0m ");
+        println!("\x1b[38;2;255;255;255m{}\x1b[0m", e);
         std::process::exit(1);
     }
 }
@@ -160,45 +161,54 @@ fn priority_order(p: &Option<char>) -> u8 {
     }
 }
 
+fn format_priority_color(priority: Option<char>) -> String {
+    match priority {
+        Some('A') => format!("\x1b[38;2;255;50;50m[A]\x1b[0m"),
+        Some('B') => format!("\x1b[38;2;255;200;0m[B]\x1b[0m"),
+        Some('C') => format!("\x1b[38;2;50;200;50m[C]\x1b[0m"),
+        _ => String::new(),
+    }
+}
+
+fn format_action(action: &str, priority: Option<char>, text: &str, id: usize) {
+    print!("\x1b[38;2;50;200;50m{}\x1b[0m\x1b[38;2;255;255;255m:\x1b[0m ", action);
+    if let Some(p) = priority {
+        print!("{} ", format_priority_color(Some(p)));
+    }
+    print!("\x1b[38;2;255;255;255m{}\x1b[0m ", text);
+    println!("\x1b[38;2;120;120;120m(№{})\x1b[0m", id);
+}
+
 fn add_task(path: &PathBuf, priority: Option<char>, text: String) -> io::Result<()> {
-    let new_task_line = if let Some(p) = priority {
-        format!("({}) {}", p.to_ascii_uppercase(), text)
-    } else {
-        text.clone()
+    let line = match priority {
+        Some(p) => format!("({}) {}", p.to_ascii_uppercase(), text),
+        None => text.clone(),
     };
     
-    if !path.exists() {
-        fs::write(path, format!("{}\n", new_task_line))?;
-        println!("Added: {}", text);
-        return Ok(());
-    }
+    let mut lines = if path.exists() {
+        fs::read_to_string(path)?
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(String::from)
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     
-    let content = fs::read_to_string(path)?;
-    let mut lines: Vec<String> = content
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(|s| s.to_string())
-        .collect();
+    let pos = lines.iter().position(|l| {
+        priority_order(&parse_priority(l)) > priority_order(&priority)
+    }).unwrap_or(lines.len());
     
-    let new_priority_order = priority_order(&priority);
-    let mut insert_pos = lines.len();
-    
-    for (idx, line) in lines.iter().enumerate() {
-        let line_priority = parse_priority(line);
-        let line_priority_order = priority_order(&line_priority);
-        
-        if line_priority_order > new_priority_order {
-            insert_pos = idx;
-            break;
-        } else if line_priority_order == new_priority_order {
-            insert_pos = idx;
-            break;
-        }
-    }
-    
-    lines.insert(insert_pos, new_task_line);
+    lines.insert(pos, line);
     fs::write(path, lines.join("\n") + "\n")?;
-    println!("Added: {}", text);
+    
+    let tasks = read_tasks(path)?;
+    let id = tasks.iter()
+        .find(|t| t.priority == priority && t.text == text && !t.completed)
+        .map(|t| t.id)
+        .unwrap_or(pos + 1);
+    
+    format_action("Added", priority, &text, id);
     Ok(())
 }
 
@@ -225,7 +235,9 @@ fn list_tasks(path: &PathBuf) -> io::Result<()> {
     let mut active_tasks: Vec<&Task> = tasks.iter().filter(|t| !t.completed).collect();
     
     if active_tasks.is_empty() {
-        println!("No tasks.");
+        println!("\x1b[38;2;255;255;255mNo tasks.\x1b[0m");
+        println!();
+        println!("\x1b[38;2;255;255;255mYou can add new tasks with `todo A text`\x1b[0m");
         return Ok(());
     }
     
@@ -235,27 +247,30 @@ fn list_tasks(path: &PathBuf) -> io::Result<()> {
         a_order.cmp(&b_order).then(a.id.cmp(&b.id))
     });
     
+    let max_id = active_tasks.iter().map(|t| t.id).max().unwrap_or(0);
+    let width = max_id.to_string().len();
+    
     for task in active_tasks {
         match task.priority {
             Some('A') => {
                 print!("\x1b[38;2;255;50;50m\x1b[1m[A]\x1b[0m");
-                print!(" \x1b[38;2;150;150;150m{}\x1b[0m", task.id);
-                println!("  \x1b[38;2;255;255;255m{}\x1b[0m", task.text);
+                print!(" \x1b[38;2;130;130;130m{:>width$}\x1b[0m", task.id, width = width);
+                println!(" \x1b[38;2;255;255;255m{}\x1b[0m", task.text);
             }
             Some('B') => {
                 print!("\x1b[38;2;255;200;0m\x1b[1m[B]\x1b[0m");
-                print!(" \x1b[38;2;150;150;150m{}\x1b[0m", task.id);
-                println!("  \x1b[38;2;255;255;255m{}\x1b[0m", task.text);
+                print!(" \x1b[38;2;130;130;130m{:>width$}\x1b[0m", task.id, width = width);
+                println!(" \x1b[38;2;255;255;255m{}\x1b[0m", task.text);
             }
             Some('C') => {
                 print!("\x1b[38;2;50;200;50m\x1b[1m[C]\x1b[0m");
-                print!(" \x1b[38;2;150;150;150m{}\x1b[0m", task.id);
-                println!("  \x1b[38;2;255;255;255m{}\x1b[0m", task.text);
+                print!(" \x1b[38;2;130;130;130m{:>width$}\x1b[0m", task.id, width = width);
+                println!(" \x1b[38;2;255;255;255m{}\x1b[0m", task.text);
             }
             _ => {
                 print!("    ");
-                print!("\x1b[38;2;150;150;150m{}\x1b[0m", task.id);
-                println!("  \x1b[38;2;200;200;200m{}\x1b[0m", task.text);
+                print!("\x1b[38;2;130;130;130m{:>width$}\x1b[0m", task.id, width = width);
+                println!(" \x1b[38;2;210;210;210m{}\x1b[0m", task.text);
             }
         }
     }
@@ -269,25 +284,20 @@ fn complete_task(path: &PathBuf, id: usize) -> io::Result<()> {
         .find(|t| t.id == id && !t.completed)
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Task not found"))?;
     
-    let content = fs::read_to_string(path)?;
-    let lines: Vec<&str> = content.lines().collect();
-    let new_lines: Vec<String> = lines.iter()
+    let (priority, text) = (task.priority, task.text.clone());
+    
+    let lines: Vec<String> = fs::read_to_string(path)?
+        .lines()
         .enumerate()
         .filter_map(|(idx, line)| {
             let line = line.trim();
-            if line.is_empty() {
-                return None;
-            }
-            if idx + 1 == id {
-                Some(format!("x {}", line))
-            } else {
-                Some(line.to_string())
-            }
+            if line.is_empty() { return None; }
+            Some(if idx + 1 == id { format!("x {}", line) } else { line.to_string() })
         })
         .collect();
     
-    fs::write(path, new_lines.join("\n") + "\n")?;
-    println!("Completed: {}", task.text);
+    fs::write(path, lines.join("\n") + "\n")?;
+    format_action("Completed", priority, &text, id);
     Ok(())
 }
 
@@ -297,21 +307,18 @@ fn delete_task(path: &PathBuf, id: usize) -> io::Result<()> {
         .find(|t| t.id == id)
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Task not found"))?;
     
-    let content = fs::read_to_string(path)?;
-    let lines: Vec<&str> = content.lines().collect();
-    let new_lines: Vec<String> = lines.iter()
+    let (priority, text) = (task.priority, task.text.clone());
+    
+    let lines: Vec<String> = fs::read_to_string(path)?
+        .lines()
         .enumerate()
         .filter_map(|(idx, line)| {
             let line = line.trim();
-            if line.is_empty() || idx + 1 == id {
-                None
-            } else {
-                Some(line.to_string())
-            }
+            if line.is_empty() || idx + 1 == id { None } else { Some(line.to_string()) }
         })
         .collect();
     
-    fs::write(path, new_lines.join("\n") + "\n")?;
-    println!("Deleted: {}", task.text);
+    fs::write(path, lines.join("\n") + "\n")?;
+    format_action("Deleted", priority, &text, id);
     Ok(())
 }

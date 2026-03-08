@@ -65,6 +65,10 @@ fn parse_command(args: &[String]) -> io::Result<Command> {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "No command provided"));
     }
     
+    if args.len() == 1 && args[0].len() == 1 && args[0].chars().next().unwrap().is_ascii_alphabetic() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid command"));
+    }
+    
     match args[0].as_str() {
         "list" | "ls" | "l" => Ok(Command::List),
         "d" | "do" if args.len() > 1 => {
@@ -77,15 +81,10 @@ fn parse_command(args: &[String]) -> io::Result<Command> {
                 .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid task ID"))?;
             Ok(Command::Delete(id))
         }
-        first if first.len() == 1 && first.chars().next().unwrap().is_ascii_alphabetic() => {
-            let priority = first.to_uppercase().chars().next();
-            let text = args[1..].join(" ");
-            Ok(Command::Add(priority, text))
+        first if first.len() == 1 && matches!(first.to_uppercase().as_str(), "A" | "B" | "C") => {
+            Ok(Command::Add(first.to_uppercase().chars().next(), args[1..].join(" ")))
         }
-        _ => {
-            let text = args.join(" ");
-            Ok(Command::Add(None, text))
-        }
+        _ => Ok(Command::Add(None, args.join(" "))),
     }
 }
 

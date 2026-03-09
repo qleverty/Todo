@@ -16,6 +16,7 @@ enum Command {
     List,
     Complete(usize),
     Delete(usize),
+    Clear,
 }
 
 fn main() {
@@ -55,6 +56,7 @@ fn run() -> io::Result<()> {
         Command::List => list_tasks(&todo_path)?,
         Command::Complete(id) => complete_task(&todo_path, id)?,
         Command::Delete(id) => delete_task(&todo_path, id)?,
+        Command::Clear => clear_completed(&todo_path)?,
     }
     
     Ok(())
@@ -67,6 +69,7 @@ fn parse_command(args: &[String]) -> io::Result<Command> {
     
     match args[0].as_str() {
         "list" | "ls" | "l" => Ok(Command::List),
+		"clear" | "clr" if args.len() == 1 => Ok(Command::Clear),
         "d" | "do" if args.len() > 1 => {
             let id = args[1].parse()
                 .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid task ID"))?;
@@ -251,8 +254,10 @@ fn list_tasks(path: &PathBuf) -> io::Result<()> {
     for task in all_tasks {
         let (pri_color, id_color, text_color) = if task.completed {
             match task.priority {
-                Some(_) => ("\x1b[38;2;50;200;50m", "\x1b[38;2;50;200;50m", "\x1b[38;2;50;200;50m"),
-                None => ("", "\x1b[38;2;5;155;5m", "\x1b[38;2;5;155;5m"),
+                Some('A') => ("\x1b[38;2;255;50;50m", "\x1b[38;2;50;200;50m", "\x1b[38;2;50;200;50m"),
+                Some('B') => ("\x1b[38;2;255;200;0m", "\x1b[38;2;50;200;50m", "\x1b[38;2;50;200;50m"),
+                Some('C') => ("\x1b[38;2;50;200;50m", "\x1b[38;2;50;200;50m", "\x1b[38;2;50;200;50m"),
+                Some(_) | None => ("", "\x1b[38;2;5;155;5m", "\x1b[38;2;5;155;5m"),
             }
         } else {
             match task.priority {
@@ -325,5 +330,25 @@ fn delete_task(path: &PathBuf, id: usize) -> io::Result<()> {
     
     fs::write(path, lines.join("\n") + "\n")?;
     format_action("Deleted", priority, &text, id);
+    Ok(())
+}
+
+fn clear_completed(path: &PathBuf) -> io::Result<()> {
+    if !path.exists() {
+        println!("\x1b[38;2;50;200;50mCleared\x1b[0m\x1b[38;2;255;255;255m: 0 tasks were deleted\x1b[0m");
+        return Ok(());
+    }
+    
+    let content = fs::read_to_string(path)?;
+    let lines: Vec<&str> = content.lines().collect();
+    let completed_count = lines.iter().filter(|l| l.trim().starts_with("x ")).count();
+    
+    let active: Vec<String> = lines.iter()
+        .filter(|l| !l.trim().is_empty() && !l.trim().starts_with("x "))
+        .map(|s| s.to_string())
+        .collect();
+    
+    fs::write(path, active.join("\n") + "\n")?;
+    println!("\x1b[38;2;50;200;50mCleared\x1b[0m\x1b[38;2;255;255;255m: {} tasks were deleted\x1b[0m", completed_count);
     Ok(())
 }

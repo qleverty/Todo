@@ -68,19 +68,24 @@ fn parse_command(args: &[String]) -> io::Result<Command> {
     }
     
     match args[0].as_str() {
-        "list" | "ls" | "l" => Ok(Command::List),
-		"clear" | "clr" if args.len() == 1 => Ok(Command::Clear),
-        "d" | "do" if args.len() > 1 => {
-            let id = args[1].parse()
-                .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid task ID"))?;
-            Ok(Command::Complete(id))
-        }
-        "del" | "delete" if args.len() > 1 => {
-            let id = args[1].parse()
-                .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid task ID"))?;
-            Ok(Command::Delete(id))
-        }
+        "list" | "ls" | "l" if args.len() == 1 => Ok(Command::List),
+        "clear" | "clr" if args.len() == 1 => Ok(Command::Clear),
+        "d" | "do" => match args.len() {
+            1 => Err(io::Error::new(io::ErrorKind::InvalidInput, "No task ID provided.\nExample: todo d 5")),
+            2 => args[1].parse().map(Command::Complete)
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid task ID")),
+            _ => Ok(Command::Add(None, args.join(" "))),
+        },
+        "del" | "delete" => match args.len() {
+            1 => Err(io::Error::new(io::ErrorKind::InvalidInput, "No task ID provided.\nExample: todo delete 5")),
+            2 => args[1].parse().map(Command::Delete)
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid task ID")),
+            _ => Ok(Command::Add(None, args.join(" "))),
+        },
         first if first.len() == 1 && matches!(first.to_uppercase().as_str(), "A" | "B" | "C") => {
+            if args.len() == 1 {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "No text of task provided"));
+            }
             Ok(Command::Add(first.to_uppercase().chars().next(), args[1..].join(" ")))
         }
         _ => {

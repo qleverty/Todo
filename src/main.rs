@@ -65,10 +65,6 @@ fn parse_command(args: &[String]) -> io::Result<Command> {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "No command provided"));
     }
     
-    if args.len() == 1 && args[0].len() == 1 && args[0].chars().next().unwrap().is_ascii_alphabetic() {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid command"));
-    }
-    
     match args[0].as_str() {
         "list" | "ls" | "l" => Ok(Command::List),
         "d" | "do" if args.len() > 1 => {
@@ -84,7 +80,12 @@ fn parse_command(args: &[String]) -> io::Result<Command> {
         first if first.len() == 1 && matches!(first.to_uppercase().as_str(), "A" | "B" | "C") => {
             Ok(Command::Add(first.to_uppercase().chars().next(), args[1..].join(" ")))
         }
-        _ => Ok(Command::Add(None, args.join(" "))),
+        _ => {
+            if args.len() == 1 && args[0].len() == 1 && args[0].chars().next().unwrap().is_ascii_alphabetic() {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid command"));
+            }
+            Ok(Command::Add(None, args.join(" ")))
+        }
     }
 }
 
@@ -231,45 +232,47 @@ fn parse_priority(line: &str) -> Option<char> {
 
 fn list_tasks(path: &PathBuf) -> io::Result<()> {
     let tasks = read_tasks(path)?;
-    let mut active_tasks: Vec<&Task> = tasks.iter().filter(|t| !t.completed).collect();
+    let mut all_tasks: Vec<&Task> = tasks.iter().collect();
     
-    if active_tasks.is_empty() {
+    if all_tasks.is_empty() {
         println!("\x1b[38;2;255;255;255mNo tasks.\x1b[0m");
         println!();
-        println!("\x1b[38;2;255;255;255mYou can add new tasks with `todo A text`\x1b[0m");
+        println!("\x1b[38;2;255;255;255mYou can add new tasks with `todo B text`\x1b[0m");
         return Ok(());
     }
     
-    active_tasks.sort_by(|a, b| {
-        let a_order = priority_order(&a.priority);
-        let b_order = priority_order(&b.priority);
-        a_order.cmp(&b_order).then(a.id.cmp(&b.id))
+    all_tasks.sort_by(|a, b| {
+        priority_order(&a.priority).cmp(&priority_order(&b.priority)).then(a.id.cmp(&b.id))
     });
     
-    let max_id = active_tasks.iter().map(|t| t.id).max().unwrap_or(0);
+    let max_id = all_tasks.iter().map(|t| t.id).max().unwrap_or(0);
     let width = max_id.to_string().len();
     
-    for task in active_tasks {
+    for task in all_tasks {
+        let (pri_color, id_color, text_color) = if task.completed {
+            match task.priority {
+                Some(_) => ("\x1b[38;2;50;200;50m", "\x1b[38;2;50;200;50m", "\x1b[38;2;50;200;50m"),
+                None => ("", "\x1b[38;2;5;155;5m", "\x1b[38;2;5;155;5m"),
+            }
+        } else {
+            match task.priority {
+                Some('A') => ("\x1b[38;2;255;50;50m", "\x1b[38;2;130;130;130m", "\x1b[38;2;255;255;255m"),
+                Some('B') => ("\x1b[38;2;255;200;0m", "\x1b[38;2;130;130;130m", "\x1b[38;2;255;255;255m"),
+                Some('C') => ("\x1b[38;2;50;200;50m", "\x1b[38;2;130;130;130m", "\x1b[38;2;255;255;255m"),
+                Some(_) | None => ("", "\x1b[38;2;130;130;130m", "\x1b[38;2;210;210;210m"),
+            }
+        };
+        
         match task.priority {
-            Some('A') => {
-                print!("\x1b[38;2;255;50;50m\x1b[1m[A]\x1b[0m");
-                print!(" \x1b[38;2;130;130;130m{:>width$}\x1b[0m", task.id, width = width);
-                println!(" \x1b[38;2;255;255;255m{}\x1b[0m", task.text);
+            Some(p) => {
+                print!("{}\x1b[1m[{}]\x1b[0m", pri_color, p);
+                print!(" {}{:>width$}\x1b[0m", id_color, task.id, width = width);
+                println!(" {}{}\x1b[0m", text_color, task.text);
             }
-            Some('B') => {
-                print!("\x1b[38;2;255;200;0m\x1b[1m[B]\x1b[0m");
-                print!(" \x1b[38;2;130;130;130m{:>width$}\x1b[0m", task.id, width = width);
-                println!(" \x1b[38;2;255;255;255m{}\x1b[0m", task.text);
-            }
-            Some('C') => {
-                print!("\x1b[38;2;50;200;50m\x1b[1m[C]\x1b[0m");
-                print!(" \x1b[38;2;130;130;130m{:>width$}\x1b[0m", task.id, width = width);
-                println!(" \x1b[38;2;255;255;255m{}\x1b[0m", task.text);
-            }
-            _ => {
+            None => {
                 print!("    ");
-                print!("\x1b[38;2;130;130;130m{:>width$}\x1b[0m", task.id, width = width);
-                println!(" \x1b[38;2;210;210;210m{}\x1b[0m", task.text);
+                print!("{}{:>width$}\x1b[0m", id_color, task.id, width = width);
+                println!(" {}{}\x1b[0m", text_color, task.text);
             }
         }
     }
@@ -279,9 +282,12 @@ fn list_tasks(path: &PathBuf) -> io::Result<()> {
 
 fn complete_task(path: &PathBuf, id: usize) -> io::Result<()> {
     let tasks = read_tasks(path)?;
-    let task = tasks.iter()
-        .find(|t| t.id == id && !t.completed)
+    let task = tasks.iter().find(|t| t.id == id)
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Task not found"))?;
+    
+    if task.completed {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Task already completed"));
+    }
     
     let (priority, text) = (task.priority, task.text.clone());
     

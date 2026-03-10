@@ -2,6 +2,7 @@ use std::env;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
+use std::collections::HashSet;
 
 #[derive(Debug, Clone)]
 struct Task {
@@ -14,8 +15,8 @@ struct Task {
 enum Command {
     Add(Option<char>, String),
     List,
-    Complete(usize),
-    Delete(usize),
+    Complete(Vec<usize>),
+    Delete(Vec<usize>),
     Clear,
 }
 
@@ -62,6 +63,47 @@ fn run() -> io::Result<()> {
     Ok(())
 }
 
+fn is_valid_batch_arg(s: &str) -> bool {
+    if s.is_empty() || s.starts_with('-') || s.ends_with('-') {
+        return false;
+    }
+    
+    let dash_count = s.chars().filter(|&c| c == '-').count();
+    if dash_count > 1 {
+        return false;
+    }
+    
+    s.chars().all(|c| c.is_ascii_digit() || c == '-')
+}
+
+fn parse_batch_args(args: &[String]) -> Result<Vec<usize>, String> {
+    if !args.iter().all(|arg| is_valid_batch_arg(arg)) {
+        return Err("Invalid batch format".to_string());
+    }
+    
+    let mut ids = HashSet::new();
+    
+    for arg in args {
+        if let Some(pos) = arg.find('-') {
+            let start: usize = arg[..pos].parse().map_err(|_| "Invalid range")?;
+            let end: usize = arg[pos + 1..].parse().map_err(|_| "Invalid range")?;
+            
+            if start > end {
+                return Err("Invalid range".to_string());
+            }
+            
+            for id in start..=end {
+                ids.insert(id);
+            }
+        } else {
+            let id: usize = arg.parse().map_err(|_| "Invalid ID")?;
+            ids.insert(id);
+        }
+    }
+    
+    Ok(ids.into_iter().collect())
+}
+
 fn parse_command(args: &[String]) -> io::Result<Command> {
     if args.is_empty() {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "No command provided"));
@@ -70,17 +112,23 @@ fn parse_command(args: &[String]) -> io::Result<Command> {
     match args[0].as_str() {
         "list" | "ls" | "l" if args.len() == 1 => Ok(Command::List),
         "clear" | "clr" if args.len() == 1 => Ok(Command::Clear),
-        "d" | "do" => match args.len() {
-            1 => Err(io::Error::new(io::ErrorKind::InvalidInput, "No task ID provided.\nExample: todo d 5")),
-            2 => args[1].parse().map(Command::Complete)
-                .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid task ID")),
-            _ => Ok(Command::Add(None, args.join(" "))),
+        "d" | "do" => {
+            if args.len() == 1 {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "No task ID provided.\nExample: todo d 5"));
+            }
+            match parse_batch_args(&args[1..]) {
+                Ok(ids) => Ok(Command::Complete(ids)),
+                Err(_) => Ok(Command::Add(None, args.join(" "))),
+            }
         },
-        "del" | "delete" => match args.len() {
-            1 => Err(io::Error::new(io::ErrorKind::InvalidInput, "No task ID provided.\nExample: todo delete 5")),
-            2 => args[1].parse().map(Command::Delete)
-                .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid task ID")),
-            _ => Ok(Command::Add(None, args.join(" "))),
+        "del" | "delete" => {
+            if args.len() == 1 {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "No task ID provided.\nExample: todo delete 5"));
+            }
+            match parse_batch_args(&args[1..]) {
+                Ok(ids) => Ok(Command::Delete(ids)),
+                Err(_) => Ok(Command::Add(None, args.join(" "))),
+            }
         },
         first if first.len() == 1 && matches!(first.to_uppercase().as_str(), "A" | "B" | "C") => {
             if args.len() == 1 {
@@ -290,51 +338,107 @@ fn list_tasks(path: &PathBuf) -> io::Result<()> {
     Ok(())
 }
 
-fn complete_task(path: &PathBuf, id: usize) -> io::Result<()> {
+fn complete_task(path: &PathBuf, ids: Vec<usize>) -> io::Result<()> {
     let tasks = read_tasks(path)?;
-    let task = tasks.iter().find(|t| t.id == id)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Task not found"))?;
     
-    if task.completed {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Task already completed"));
-    }
-    
-    let (priority, text) = (task.priority, task.text.clone());
-    
-    let lines: Vec<String> = fs::read_to_string(path)?
-        .lines()
-        .enumerate()
-        .filter_map(|(idx, line)| {
-            let line = line.trim();
-            if line.is_empty() { return None; }
-            Some(if idx + 1 == id { format!("x {}", line) } else { line.to_string() })
-        })
+    let valid_ids: Vec<usize> = ids.iter()
+        .filter(|&&id| tasks.iter().any(|t| t.id == id && !t.completed))
+        .copied()
         .collect();
     
-    fs::write(path, lines.join("\n") + "\n")?;
-    format_action("Completed", priority, &text, id);
+    if valid_ids.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "No valid tasks found"));
+    }
+    
+    if valid_ids.len() == 1 {
+        let id = valid_ids[0];
+        let task = tasks.iter().find(|t| t.id == id).unwrap();
+        let (priority, text) = (task.priority, task.text.clone());
+        
+        let lines: Vec<String> = fs::read_to_string(path)?
+            .lines()
+            .enumerate()
+            .filter_map(|(idx, line)| {
+                let line = line.trim();
+                if line.is_empty() { return None; }
+                Some(if idx + 1 == id { format!("x {}", line) } else { line.to_string() })
+            })
+            .collect();
+        
+        fs::write(path, lines.join("\n") + "\n")?;
+        format_action("Completed", priority, &text, id);
+    } else {
+        let valid_set: HashSet<usize> = valid_ids.iter().copied().collect();
+        
+        let lines: Vec<String> = fs::read_to_string(path)?
+            .lines()
+            .enumerate()
+            .filter_map(|(idx, line)| {
+                let line = line.trim();
+                if line.is_empty() { return None; }
+                Some(if valid_set.contains(&(idx + 1)) { 
+                    format!("x {}", line) 
+                } else { 
+                    line.to_string() 
+                })
+            })
+            .collect();
+        
+        fs::write(path, lines.join("\n") + "\n")?;
+        println!("\x1b[38;2;50;200;50mCompleted\x1b[0m\x1b[38;2;255;255;255m: {} tasks were completed\x1b[0m", valid_ids.len());
+    }
+    
     Ok(())
 }
 
-fn delete_task(path: &PathBuf, id: usize) -> io::Result<()> {
+fn delete_task(path: &PathBuf, ids: Vec<usize>) -> io::Result<()> {
     let tasks = read_tasks(path)?;
-    let task = tasks.iter()
-        .find(|t| t.id == id)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Task not found"))?;
     
-    let (priority, text) = (task.priority, task.text.clone());
-    
-    let lines: Vec<String> = fs::read_to_string(path)?
-        .lines()
-        .enumerate()
-        .filter_map(|(idx, line)| {
-            let line = line.trim();
-            if line.is_empty() || idx + 1 == id { None } else { Some(line.to_string()) }
-        })
+    let valid_ids: Vec<usize> = ids.iter()
+        .filter(|&&id| tasks.iter().any(|t| t.id == id))
+        .copied()
         .collect();
     
-    fs::write(path, lines.join("\n") + "\n")?;
-    format_action("Deleted", priority, &text, id);
+    if valid_ids.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "No valid tasks found"));
+    }
+    
+    if valid_ids.len() == 1 {
+        let id = valid_ids[0];
+        let task = tasks.iter().find(|t| t.id == id).unwrap();
+        let (priority, text) = (task.priority, task.text.clone());
+        
+        let lines: Vec<String> = fs::read_to_string(path)?
+            .lines()
+            .enumerate()
+            .filter_map(|(idx, line)| {
+                let line = line.trim();
+                if line.is_empty() || idx + 1 == id { None } else { Some(line.to_string()) }
+            })
+            .collect();
+        
+        fs::write(path, lines.join("\n") + "\n")?;
+        format_action("Deleted", priority, &text, id);
+    } else {
+        let valid_set: HashSet<usize> = valid_ids.iter().copied().collect();
+        
+        let lines: Vec<String> = fs::read_to_string(path)?
+            .lines()
+            .enumerate()
+            .filter_map(|(idx, line)| {
+                let line = line.trim();
+                if line.is_empty() || valid_set.contains(&(idx + 1)) { 
+                    None 
+                } else { 
+                    Some(line.to_string()) 
+                }
+            })
+            .collect();
+        
+        fs::write(path, lines.join("\n") + "\n")?;
+        println!("\x1b[38;2;50;200;50mDeleted\x1b[0m\x1b[38;2;255;255;255m: {} tasks were deleted\x1b[0m", valid_ids.len());
+    }
+    
     Ok(())
 }
 

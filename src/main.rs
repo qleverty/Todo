@@ -18,6 +18,7 @@ enum Command {
     Complete(Vec<usize>),
     Delete(Vec<usize>),
     Clear,
+    Help,
 }
 
 fn main() {
@@ -58,6 +59,7 @@ fn run() -> io::Result<()> {
         Command::Complete(id) => complete_task(&todo_path, id)?,
         Command::Delete(id) => delete_task(&todo_path, id)?,
         Command::Clear => clear_completed(&todo_path)?,
+        Command::Help => show_help(),
     }
     
     Ok(())
@@ -112,6 +114,7 @@ fn parse_command(args: &[String]) -> io::Result<Command> {
     match args[0].as_str() {
         "list" | "ls" | "l" if args.len() == 1 => Ok(Command::List),
         "clear" | "clr" if args.len() == 1 => Ok(Command::Clear),
+        "help" | "h" if args.len() == 1 => Ok(Command::Help),
         "d" | "do" => {
             if args.len() == 1 {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, "No task ID provided.\nExample: todo d 5"));
@@ -460,4 +463,37 @@ fn clear_completed(path: &PathBuf) -> io::Result<()> {
     fs::write(path, active.join("\n") + "\n")?;
     println!("\x1b[38;2;50;200;50mCleared\x1b[0m\x1b[38;2;255;255;255m: {} tasks were deleted\x1b[0m", completed_count);
     Ok(())
+}
+
+fn show_help() {
+    println!("\x1b[38;2;255;255;255mADD TASKS:\x1b[0m");
+    println!("  \x1b[38;2;210;210;210mtodo some task      → add task without priority\x1b[0m");
+    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;50;50mA\x1b[0m\x1b[38;2;210;210;210m urgent task  → add with \x1b[38;2;255;50;50mhigh\x1b[0m\x1b[38;2;210;210;210m priority\x1b[0m");
+    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;200;0mB\x1b[0m\x1b[38;2;210;210;210m normal task  → add with \x1b[38;2;255;200;0mmedium\x1b[0m\x1b[38;2;210;210;210m priority\x1b[0m");
+    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;50;200;50mC\x1b[0m\x1b[38;2;210;210;210m minor task   → add with \x1b[38;2;50;200;50mlow\x1b[0m\x1b[38;2;210;210;210m priority\x1b[0m");
+    println!();
+    println!("\x1b[38;2;255;255;255mVIEW TASKS:\x1b[0m");
+    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mlist\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mls\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255ml\x1b[0m\x1b[38;2;210;210;210m      → show all tasks\x1b[0m");
+    println!();
+    println!("\x1b[38;2;255;255;255mCOMPLETE TASKS:\x1b[0m");
+    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mdo\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255md\x1b[0m\x1b[38;2;210;210;210m <id|range>... → mark task(s) as completed\x1b[0m");
+    println!("  \x1b[38;2;210;210;210mExamples:\x1b[0m");
+    println!("    \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mdo\x1b[0m\x1b[38;2;210;210;210m 3         → complete task #3\x1b[0m");
+    println!("    \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mdo\x1b[0m\x1b[38;2;210;210;210m 1 5 9     → complete tasks #1, #5, #9\x1b[0m");
+    println!("    \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mdo\x1b[0m\x1b[38;2;210;210;210m 4-7       → complete tasks #4, #5, #6, #7 (range)\x1b[0m");
+    println!("    \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mdo\x1b[0m\x1b[38;2;210;210;210m 1 4-7 10  → complete #1, #4-7, #10\x1b[0m");
+    println!();
+    println!("\x1b[38;2;255;255;255mDELETE TASKS:\x1b[0m");
+    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mdelete\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mdel\x1b[0m\x1b[38;2;210;210;210m <id|range>... → delete task(s)\x1b[0m");
+    println!("  \x1b[38;2;210;210;210mExamples:\x1b[0m");
+    println!("    \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mdelete\x1b[0m\x1b[38;2;210;210;210m 5     → delete task #5\x1b[0m");
+    println!("    \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mdelete\x1b[0m\x1b[38;2;210;210;210m 1-3 8 → delete tasks #1, #2, #3, #8\x1b[0m");
+    println!();
+    println!("\x1b[38;2;255;255;255mOTHER:\x1b[0m");
+    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mclear\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mclr\x1b[0m\x1b[38;2;210;210;210m     → remove all completed tasks\x1b[0m");
+    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mhelp\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mh\x1b[0m\x1b[38;2;210;210;210m        → show this help\x1b[0m");
+    println!();
+	println!();
+    println!("\x1b[38;2;255;255;255mTO\x1b[38;2;153;229;80mDO\x1b[0m \x1b[38;2;255;255;255mv{}\x1b[0m", env!("CARGO_PKG_VERSION"));
+    println!("\x1b[38;2;210;210;210mGitHub: https://github.com/qleverty/todo\x1b[0m");
 }

@@ -1,8 +1,11 @@
 use std::env;
 use std::fs;
 use std::io;
+use std::io::{Write, Cursor};
 use std::path::PathBuf;
 use std::collections::HashSet;
+use std::time::Duration;
+use serde::Deserialize;
 
 #[derive(Debug, Clone)]
 struct Task {
@@ -12,6 +15,24 @@ struct Task {
     completed: bool,
 }
 
+#[derive(Debug, Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    assets: Vec<GitHubAsset>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+struct UpdateInfo {
+    current_version: String,
+    latest_version: String,
+    download_url: String,
+}
+
 enum Command {
     Add(Option<char>, String),
     List,
@@ -19,6 +40,7 @@ enum Command {
     Delete(Vec<usize>),
     Clear,
     Help,
+    Update,
 }
 
 fn main() {
@@ -51,6 +73,12 @@ fn enable_ansi_support() {
 fn run() -> io::Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
     let cmd = parse_command(&args)?;
+    
+    match cmd {
+        Command::Update => return handle_update(),
+        _ => {}
+    }
+    
     let todo_path = find_todo_file()?;
     
     match cmd {
@@ -60,6 +88,7 @@ fn run() -> io::Result<()> {
         Command::Delete(id) => delete_task(&todo_path, id)?,
         Command::Clear => clear_completed(&todo_path)?,
         Command::Help => show_help(),
+        Command::Update => unreachable!(),
     }
     
     Ok(())
@@ -115,6 +144,7 @@ fn parse_command(args: &[String]) -> io::Result<Command> {
         "list" | "ls" | "l" if args.len() == 1 => Ok(Command::List),
         "clear" | "clr" if args.len() == 1 => Ok(Command::Clear),
         "help" | "h" if args.len() == 1 => Ok(Command::Help),
+        "update" if args.len() == 1 => Ok(Command::Update),
         "d" | "do" => {
             if args.len() == 1 {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, "No task ID provided.\nExample: todo d 5"));
@@ -211,8 +241,8 @@ fn parse_task(id: usize, line: &str) -> Task {
     Task { id, priority, text, completed }
 }
 
-fn priority_order(p: &Option<char>) -> u8 {
-    match p {
+fn priority_order(priority: &Option<char>) -> u8 {
+    match priority {
         Some('A') => 0,
         Some('B') => 1,
         Some('C') => 2,
@@ -220,78 +250,53 @@ fn priority_order(p: &Option<char>) -> u8 {
     }
 }
 
-fn format_priority_color(priority: Option<char>) -> String {
-    match priority {
-        Some('A') => format!("\x1b[38;2;255;50;50m[A]\x1b[0m"),
-        Some('B') => format!("\x1b[38;2;255;200;0m[B]\x1b[0m"),
-        Some('C') => format!("\x1b[38;2;50;200;50m[C]\x1b[0m"),
-        _ => String::new(),
-    }
-}
-
 fn format_action(action: &str, priority: Option<char>, text: &str, id: usize) {
-    print!("\x1b[38;2;50;200;50m{}\x1b[0m\x1b[38;2;255;255;255m:\x1b[0m ", action);
+    let color = match priority {
+        Some('A') => "\x1b[38;2;255;50;50m",
+        Some('B') => "\x1b[38;2;255;200;0m",
+        Some('C') => "\x1b[38;2;50;200;50m",
+        _ => "\x1b[38;2;50;200;50m",
+    };
+    
+    print!("{}{}\x1b[0m\x1b[38;2;255;255;255m:\x1b[0m ", color, action);
+    
     if let Some(p) = priority {
-        print!("{} ", format_priority_color(Some(p)));
+        print!("{}\x1b[1m[{}]\x1b[0m ", color, p);
     }
-    print!("\x1b[38;2;255;255;255m{}\x1b[0m ", text);
-    println!("\x1b[38;2;120;120;120m(№{})\x1b[0m", id);
+    
+    print!("\x1b[38;2;130;130;130m{}\x1b[0m ", id);
+    println!("\x1b[38;2;255;255;255m{}\x1b[0m", text);
 }
 
 fn add_task(path: &PathBuf, priority: Option<char>, text: String) -> io::Result<()> {
-    let line = match priority {
-        Some(p) => format!("({}) {}", p.to_ascii_uppercase(), text),
+    let mut content = if path.exists() {
+        fs::read_to_string(path)?
+    } else {
+        String::new()
+    };
+    
+    let next_id = content.lines()
+        .filter(|l| !l.trim().is_empty())
+        .count() + 1;
+    
+    let task_line = match priority {
+        Some(p) => format!("({}) {}", p, text),
         None => text.clone(),
     };
     
-    let mut lines = if path.exists() {
-        fs::read_to_string(path)?
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .map(String::from)
-            .collect::<Vec<_>>()
-    } else {
-        Vec::new()
-    };
+    if !content.is_empty() && !content.ends_with('\n') {
+        content.push('\n');
+    }
+    content.push_str(&task_line);
+    content.push('\n');
     
-    let pos = lines.iter().position(|l| {
-        priority_order(&parse_priority(l)) > priority_order(&priority)
-    }).unwrap_or(lines.len());
-    
-    lines.insert(pos, line);
-    fs::write(path, lines.join("\n") + "\n")?;
-    
-    let tasks = read_tasks(path)?;
-    let id = tasks.iter()
-        .find(|t| t.priority == priority && t.text == text && !t.completed)
-        .map(|t| t.id)
-        .unwrap_or(pos + 1);
-    
-    format_action("Added", priority, &text, id);
+    fs::write(path, content)?;
+    format_action("Added", priority, &text, next_id);
     Ok(())
 }
 
-fn parse_priority(line: &str) -> Option<char> {
-    let line = line.trim();
-    let line = if line.starts_with("x ") && line.len() > 2 {
-        line[2..].trim()
-    } else {
-        line
-    };
-    
-    if line.len() > 3 
-        && line.starts_with('(') 
-        && line.chars().nth(2) == Some(')') 
-        && line.chars().nth(1).map(|c| c.is_ascii_alphabetic()).unwrap_or(false) {
-        Some(line.chars().nth(1).unwrap().to_ascii_uppercase())
-    } else {
-        None
-    }
-}
-
 fn list_tasks(path: &PathBuf) -> io::Result<()> {
-    let tasks = read_tasks(path)?;
-    let mut all_tasks: Vec<&Task> = tasks.iter().collect();
+    let mut all_tasks = read_tasks(path)?;
     
     if all_tasks.is_empty() {
         println!("\x1b[38;2;255;255;255mNo tasks.\x1b[0m");
@@ -465,6 +470,187 @@ fn clear_completed(path: &PathBuf) -> io::Result<()> {
     Ok(())
 }
 
+fn handle_update() -> io::Result<()> {
+    print!("\x1b[38;2;130;130;130mChecking for updates...\x1b[0m");
+    io::stdout().flush()?;
+    
+    let update_info = check_for_updates()
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    
+    println!("\r\x1b[K\x1b[38;2;50;200;50mUpdate available\x1b[0m\x1b[38;2;255;255;255m: v{} → v{}\x1b[0m", 
+        update_info.current_version, update_info.latest_version);
+    
+    print!("\x1b[38;2;255;255;255mDo you want to install? (Y/N): \x1b[0m");
+    io::stdout().flush()?;
+    
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    
+    if !input.trim().eq_ignore_ascii_case("y") {
+        println!("\x1b[38;2;130;130;130mUpdate cancelled.\x1b[0m");
+        return Ok(());
+    }
+    
+    print!("\x1b[38;2;130;130;130mDownloading...\x1b[0m");
+    io::stdout().flush()?;
+    let zip_bytes = download_update(&update_info.download_url)?;
+    println!("\r\x1b[K\x1b[38;2;50;200;50mDownloading... ✓\x1b[0m");
+    
+    print!("\x1b[38;2;130;130;130mExtracting...\x1b[0m");
+    io::stdout().flush()?;
+    extract_update(&zip_bytes)?;
+    println!("\r\x1b[K\x1b[38;2;50;200;50mExtracting... ✓\x1b[0m");
+    
+    print!("\x1b[38;2;130;130;130mCreating backup...\x1b[0m");
+    io::stdout().flush()?;
+    create_backup()?;
+    println!("\r\x1b[K\x1b[38;2;50;200;50mCreating backup... ✓\x1b[0m");
+    
+    println!("\x1b[38;2;255;255;255mReady to install. Launching updater... (TODO)\x1b[0m");
+    
+    Ok(())
+}
+
+fn check_for_updates() -> Result<UpdateInfo, String> {
+    let current_version = env!("CARGO_PKG_VERSION").to_string();
+    
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .user_agent("todo-cli")
+        .build()
+        .map_err(|e| format!("Failed to create client: {}", e))?;
+    
+    let response = client
+        .get("http://localhost:6070/repos/qleverty/todo/releases/latest")//.get("https://api.github.com/repos/qleverty/todo/releases/latest")
+        .send()
+        .map_err(|e| {
+            if e.is_timeout() {
+                "Connection timeout".to_string()
+            } else if e.is_connect() {
+                "Cannot connect to GitHub. Check your internet.".to_string()
+            } else {
+                format!("Request failed: {}", e)
+            }
+        })?;
+    
+    if !response.status().is_success() {
+        return Err(format!("GitHub API returned status: {}", response.status()));
+    }
+    
+    let release: GitHubRelease = response.json()
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+    
+    let latest_version = release.tag_name.trim_start_matches('v').to_string();
+    
+    if current_version == latest_version {
+        return Err("Already on latest version".to_string());
+    }
+    
+    let asset_name = format!("todo-v{}-win64.zip", latest_version);
+    let asset = release.assets.iter()
+        .find(|a| a.name == asset_name)
+        .ok_or_else(|| format!("Release asset '{}' not found", asset_name))?;
+    
+    Ok(UpdateInfo {
+        current_version,
+        latest_version,
+        download_url: asset.browser_download_url.clone(),
+    })
+}
+
+fn download_update(url: &str) -> io::Result<Vec<u8>> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Client error: {}", e)))?;
+    
+    let response = client.get(url)
+        .send()
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Download failed: {}", e)))?;
+    
+    if !response.status().is_success() {
+        return Err(io::Error::new(io::ErrorKind::Other, 
+            format!("Download failed with status: {}", response.status())));
+    }
+    
+    let bytes = response.bytes()
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to read response: {}", e)))?;
+    
+    Ok(bytes.to_vec())
+}
+
+fn extract_update(zip_bytes: &[u8]) -> io::Result<()> {
+    let exe_dir = env::current_exe()?
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Cannot find exe directory"))?
+        .to_path_buf();
+    
+    let temp_dir = exe_dir.join("update_temp");
+    
+    if temp_dir.exists() {
+        fs::remove_dir_all(&temp_dir)?;
+    }
+    fs::create_dir(&temp_dir)?;
+    
+    let cursor = Cursor::new(zip_bytes);
+    let mut archive = zip::ZipArchive::new(cursor)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("Invalid ZIP: {}", e)))?;
+    
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("ZIP error: {}", e)))?;
+        
+        let outpath = match file.enclosed_name() {
+            Some(path) => temp_dir.join(path),
+            None => continue,
+        };
+        
+        if file.is_dir() {
+            fs::create_dir_all(&outpath)?;
+        } else {
+            if let Some(p) = outpath.parent() {
+                if !p.exists() {
+                    fs::create_dir_all(p)?;
+                }
+            }
+            let mut outfile = fs::File::create(&outpath)?;
+            io::copy(&mut file, &mut outfile)?;
+        }
+    }
+    
+    Ok(())
+}
+
+fn create_backup() -> io::Result<()> {
+    let exe_dir = env::current_exe()?
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Cannot find exe directory"))?
+        .to_path_buf();
+    
+    let temp_dir = exe_dir.join("update_temp");
+    let backup_dir = exe_dir.join("update_backup");
+    
+    if backup_dir.exists() {
+        fs::remove_dir_all(&backup_dir)?;
+    }
+    fs::create_dir(&backup_dir)?;
+    
+    let entries = fs::read_dir(&temp_dir)?;
+    
+    for entry in entries {
+        let entry = entry?;
+        let filename = entry.file_name();
+        let source = exe_dir.join(&filename);
+        
+        if source.exists() && source.is_file() {
+            let dest = backup_dir.join(&filename);
+            fs::copy(&source, &dest)?;
+        }
+    }
+    
+    Ok(())
+}
+
 fn show_help() {
     println!("\x1b[38;2;255;255;255mADD TASKS:\x1b[0m");
     println!("  \x1b[38;2;210;210;210mtodo some task      → add task without priority\x1b[0m");
@@ -491,6 +677,7 @@ fn show_help() {
     println!();
     println!("\x1b[38;2;255;255;255mOTHER:\x1b[0m");
     println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mclear\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mclr\x1b[0m\x1b[38;2;210;210;210m     → remove all completed tasks\x1b[0m");
+    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mupdate\x1b[0m\x1b[38;2;210;210;210m        → check for updates\x1b[0m");
     println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mhelp\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mh\x1b[0m\x1b[38;2;210;210;210m        → show this help\x1b[0m");
     println!();
 	println!();

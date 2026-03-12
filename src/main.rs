@@ -257,21 +257,20 @@ fn priority_order(priority: &Option<char>) -> u8 {
 }
 
 fn format_action(action: &str, priority: Option<char>, text: &str, id: usize) {
-    let color = match priority {
-        Some('A') => "\x1b[38;2;255;50;50m",
-        Some('B') => "\x1b[38;2;255;200;0m",
-        Some('C') => "\x1b[38;2;50;200;50m",
-        _ => "\x1b[38;2;50;200;50m",
-    };
-    
-    print!("{}{}\x1b[0m\x1b[38;2;255;255;255m:\x1b[0m ", color, action);
+    print!("\x1b[38;2;50;200;50m{}\x1b[0m\x1b[38;2;255;255;255m:\x1b[0m ", action);
     
     if let Some(p) = priority {
+        let color = match p {
+            'A' => "\x1b[38;2;255;50;50m",
+            'B' => "\x1b[38;2;255;200;0m",
+            'C' => "\x1b[38;2;50;200;50m",
+            _ => "\x1b[38;2;50;200;50m",
+        };
         print!("{}\x1b[1m[{}]\x1b[0m ", color, p);
     }
     
-    print!("\x1b[38;2;130;130;130m{}\x1b[0m ", id);
-    println!("\x1b[38;2;255;255;255m{}\x1b[0m", text);
+    print!("\x1b[38;2;255;255;255m{}\x1b[0m ", text);
+    println!("\x1b[38;2;210;210;210m(№{})\x1b[0m", id);
 }
 
 fn add_task(path: &PathBuf, priority: Option<char>, text: String) -> io::Result<()> {

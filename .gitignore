@@ -12,6 +12,8 @@ updater/todo.bat
 updater/todo.txt
 updater/Cargo.lock
 
+installer.iss
+
 **/*.rs.bk
 
 *.pdb

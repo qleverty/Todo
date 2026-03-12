@@ -40,10 +40,9 @@ fn enable_ansi_support() {
 }
 
 fn install_update() {
-	println!();
-    println!("\x1b[38;2;255;255;255mUpdating TODO...\x1b[0m\n");
+    println!("\nApplying update...\n");
     
-    thread::sleep(Duration::from_millis(1000));
+    thread::sleep(Duration::from_millis(300));
     
     let exe_dir = match get_exe_dir() {
         Ok(dir) => dir,
@@ -91,10 +90,10 @@ fn install_update() {
         
         match fs::copy(&source, &dest) {
             Ok(_) => {
-                println!("\r\x1b[K\x1b[38;2;130;130;130mReplacing {}\x1b[0m \x1b[38;2;50;200;50m✓\x1b[0m", filename_str);
+                println!("\r\x1b[K\x1b[38;2;130;130;130mReplacing {}\x1b[0m \x1b[38;2;50;200;50mDone\x1b[0m", filename_str);
             }
             Err(e) => {
-                println!("\r\x1b[K\x1b[38;2;130;130;130mReplacing {}\x1b[0m \x1b[38;2;255;50;50mError: {}\x1b[0m", filename_str, e);
+                println!("\r\x1b[K\x1b[38;2;130;130;130mReplacing {}\x1b[0m \x1b[38;2;255;50;50mFailed: {}\x1b[0m", filename_str, e);
                 all_ok = false;
                 break;
             }
@@ -106,19 +105,19 @@ fn install_update() {
     if all_ok {
         fs::remove_dir_all(&temp_dir).ok();
         println!("\x1b[38;2;50;200;50mUpdate complete!\x1b[0m\n");
+        thread::sleep(Duration::from_secs(2));
     } else {
         println!("\x1b[38;2;255;50;50mUpdate failed!\x1b[0m");
         println!("\x1b[38;2;255;255;255mBackup saved in 'update_backup'.\x1b[0m");
         println!("\x1b[38;2;255;255;255mUse 'todo rollback' to restore.\x1b[0m\n");
+        wait_for_key();
     }
-    
-    wait_for_key();
 }
 
 fn rollback_update() {
-    println!("\x1b[38;2;255;255;255mRolling back...\x1b[0m\n");
+    println!("\nRolling back...\n");
     
-    thread::sleep(Duration::from_millis(1000));
+    thread::sleep(Duration::from_millis(300));
     
     let exe_dir = match get_exe_dir() {
         Ok(dir) => dir,
@@ -175,10 +174,10 @@ fn rollback_update() {
         
         match fs::copy(&source, &dest) {
             Ok(_) => {
-                println!("\r\x1b[K\x1b[38;2;130;130;130mRestoring {}\x1b[0m \x1b[38;2;50;200;50m✓\x1b[0m", filename_str);
+                println!("\r\x1b[K\x1b[38;2;130;130;130mRestoring {}\x1b[0m \x1b[38;2;50;200;50mDone\x1b[0m", filename_str);
             }
             Err(e) => {
-                println!("\r\x1b[K\x1b[38;2;130;130;130mRestoring {}\x1b[0m \x1b[38;2;255;50;50mError: {}\x1b[0m", filename_str, e);
+                println!("\r\x1b[K\x1b[38;2;130;130;130mRestoring {}\x1b[0m \x1b[38;2;255;50;50mFailed: {}\x1b[0m", filename_str, e);
                 all_ok = false;
                 break;
             }
@@ -194,11 +193,11 @@ fn rollback_update() {
         }
         
         println!("\x1b[38;2;50;200;50mRollback complete!\x1b[0m\n");
+        thread::sleep(Duration::from_secs(2));
     } else {
         println!("\x1b[38;2;255;50;50mRollback failed!\x1b[0m\n");
+        wait_for_key();
     }
-    
-    wait_for_key();
 }
 
 fn get_exe_dir() -> io::Result<PathBuf> {

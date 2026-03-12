@@ -480,8 +480,17 @@ fn handle_update() -> io::Result<()> {
     print!("\x1b[38;2;130;130;130mChecking for updates...\x1b[0m");
     io::stdout().flush()?;
     
-    let update_info = check_for_updates()
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let update_info = match check_for_updates() {
+        Ok(info) => info,
+        Err(e) if e == "Already on latest version" => {
+            println!("\r\x1b[K\x1b[38;2;50;200;50mAlready on latest version\x1b[0m");
+            return Ok(());
+        }
+        Err(e) => {
+            println!();
+            return Err(io::Error::new(io::ErrorKind::Other, e));
+        }
+    };
     
     println!("\r\x1b[K\x1b[38;2;50;200;50mUpdate available\x1b[0m\x1b[38;2;255;255;255m: v{} → v{}\x1b[0m", 
         update_info.current_version, update_info.latest_version);
@@ -500,17 +509,17 @@ fn handle_update() -> io::Result<()> {
     print!("\x1b[38;2;130;130;130mDownloading...\x1b[0m");
     io::stdout().flush()?;
     let zip_bytes = download_update(&update_info.download_url)?;
-    println!("\r\x1b[K\x1b[38;2;50;200;50mDownloading... ✓\x1b[0m");
+    println!("\r\x1b[K\x1b[38;2;50;200;50mDownloading... Done\x1b[0m");
     
     print!("\x1b[38;2;130;130;130mExtracting...\x1b[0m");
     io::stdout().flush()?;
     extract_update(&zip_bytes)?;
-    println!("\r\x1b[K\x1b[38;2;50;200;50mExtracting... ✓\x1b[0m");
+    println!("\r\x1b[K\x1b[38;2;50;200;50mExtracting... Done\x1b[0m");
     
     print!("\x1b[38;2;130;130;130mCreating backup...\x1b[0m");
     io::stdout().flush()?;
     create_backup()?;
-    println!("\r\x1b[K\x1b[38;2;50;200;50mCreating backup... ✓\x1b[0m");
+    println!("\r\x1b[K\x1b[38;2;50;200;50mCreating backup... Done\x1b[0m");
     
     #[cfg(windows)]
     let updater_name = "updater.exe";
@@ -537,7 +546,7 @@ fn handle_update() -> io::Result<()> {
     fs::copy(&updater_in_temp, &updater_dest)?;
     fs::remove_file(&updater_in_temp)?;
     
-    println!("\r\x1b[K\x1b[38;2;50;200;50mPreparing updater... ✓\x1b[0m");
+    println!("\r\x1b[K\x1b[38;2;50;200;50mPreparing updater... Done\x1b[0m");
     println!("\x1b[38;2;255;255;255mLaunching updater...\x1b[0m");
     
     std::process::Command::new(&updater_dest)
@@ -699,9 +708,16 @@ fn check_update_state() {
     let temp_exists = exe_dir.join("update_temp").exists();
     let backup_exists = exe_dir.join("update_backup").exists();
     
-    if temp_exists && backup_exists {
-        eprintln!("\x1b[38;2;255;50;50m⚠ Previous update failed!\x1b[0m");
+    if !temp_exists && backup_exists {
+        println!("\x1b[38;2;50;200;50mSuccessfully updated to v{}!\x1b[0m\n", 
+            env!("CARGO_PKG_VERSION"));
+    } else if temp_exists && backup_exists {
+        eprintln!("\x1b[38;2;255;50;50m[!] Previous update failed!\x1b[0m");
         eprintln!("\x1b[38;2;255;255;255mRun '\x1b[38;2;50;200;50mtodo rollback\x1b[0m\x1b[38;2;255;255;255m' to restore previous version.\x1b[0m");
+        eprintln!();
+    } else if temp_exists && !backup_exists {
+        eprintln!("\x1b[38;2;255;200;0m[!] Incomplete update found.\x1b[0m");
+        eprintln!("\x1b[38;2;255;255;255mDelete 'update_temp' manually.\x1b[0m");
         eprintln!();
     }
 }

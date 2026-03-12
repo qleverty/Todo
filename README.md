@@ -10,11 +10,10 @@ Stores tasks in a plain `todo.txt` next to the executable (or in the current dir
 
 ## Installation
 
-Releases are manual for now — you have to build it yourself if you have Rust installed:
+Download the [installer](https://github.com/qleverty/todo/releases/latest) from the releases page, or build it yourself if you have Rust installed:
 ```bash
 cargo build --release
 ```
-(Auto-istaller will be added later)
 
 ---
 
@@ -24,7 +23,7 @@ cargo build --release
 
 ```bash
 todo buy milk                  # no priority
-todo A submit the report today # high priority (red)
+todo A submit the report       # high priority (red)
 todo B call the doctor         # medium priority (yellow)
 todo C clean up inbox          # low priority (green)
 ```
@@ -42,7 +41,7 @@ Tasks are sorted by priority: A first, then B, C, and no priority last.
 ```bash
 todo do 3          # complete task #3
 todo d 1 5 9       # multiple tasks at once
-todo d 4-7         # range: #4, #5, #6, #7
+todo d 4-7         # range: №4, №5, №6, №7
 todo d 1 4-7 10    # mix of both
 ```
 
@@ -65,6 +64,11 @@ todo clear   # or clr — deletes all completed tasks
 todo help   # or h
 ```
 
+### Update
+```bash
+todo update
+```
+
 ---
 
 ## todo.txt format
@@ -78,3 +82,4 @@ Plain text file, one task per line:
 a task with no priority
 x (B) already completed task
 ```
+

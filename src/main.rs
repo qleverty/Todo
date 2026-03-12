@@ -274,28 +274,44 @@ fn format_action(action: &str, priority: Option<char>, text: &str, id: usize) {
 }
 
 fn add_task(path: &PathBuf, priority: Option<char>, text: String) -> io::Result<()> {
-    let mut content = if path.exists() {
+    let mut lines: Vec<String> = if path.exists() {
         fs::read_to_string(path)?
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|s| s.to_string())
+            .collect()
     } else {
-        String::new()
+        Vec::new()
     };
-    
-    let next_id = content.lines()
-        .filter(|l| !l.trim().is_empty())
-        .count() + 1;
     
     let task_line = match priority {
         Some(p) => format!("({}) {}", p, text),
         None => text.clone(),
     };
     
-    if !content.is_empty() && !content.ends_with('\n') {
-        content.push('\n');
-    }
-    content.push_str(&task_line);
-    content.push('\n');
+    let priority_order = |p: Option<char>| match p {
+        Some('A') => 0,
+        Some('B') => 1,
+        Some('C') => 2,
+        _ => 3,
+    };
     
-    fs::write(path, content)?;
+    let new_priority_order = priority_order(priority);
+    
+    let insert_pos = lines.iter().position(|line| {
+        let line_priority = if line.len() > 3 && line.starts_with('(') && line.chars().nth(2) == Some(')') {
+            line.chars().nth(1)
+        } else {
+            None
+        };
+        priority_order(line_priority) > new_priority_order
+    }).unwrap_or(lines.len());
+    
+    lines.insert(insert_pos, task_line);
+    
+    let next_id = insert_pos + 1;
+    
+    fs::write(path, lines.join("\n") + "\n")?;
     format_action("Added", priority, &text, next_id);
     Ok(())
 }
@@ -305,8 +321,7 @@ fn list_tasks(path: &PathBuf) -> io::Result<()> {
     
     if all_tasks.is_empty() {
         println!("\x1b[38;2;255;255;255mNo tasks.\x1b[0m");
-        println!();
-        println!("\x1b[38;2;255;255;255mYou can add new tasks with `todo B text`\x1b[0m");
+        println!("\x1b[38;2;255;255;255mUse`todo help` for commands list\x1b[0m");
         return Ok(());
     }
     
@@ -565,7 +580,7 @@ fn check_for_updates() -> Result<UpdateInfo, String> {
         .map_err(|e| format!("Failed to create client: {}", e))?;
     
     let response = client
-        .get("http://localhost:6070/repos/qleverty/todo/releases/latest")//.get("https://api.github.com/repos/qleverty/todo/releases/latest")
+        .get("https://api.github.com/repos/qleverty/todo/releases/latest")//.get("http://localhost:6070/repos/qleverty/todo/releases/latest")
         .send()
         .map_err(|e| {
             if e.is_timeout() {
@@ -780,7 +795,8 @@ fn show_help() {
     println!();
     println!("\x1b[38;2;255;255;255mOTHER:\x1b[0m");
     println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mclear\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mclr\x1b[0m\x1b[38;2;210;210;210m     → remove all completed tasks\x1b[0m");
-    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mupdate\x1b[0m\x1b[38;2;210;210;210m        → check for updates\x1b[0m");
+println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mupdate\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mu\x1b[0m\x1b[38;2;210;210;210m       → check for updates\x1b[0m");
+    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mrollback\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mr\x1b[0m\x1b[38;2;210;210;210m     → restore previous version\x1b[0m");
     println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mhelp\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mh\x1b[0m\x1b[38;2;210;210;210m        → show this help\x1b[0m");
     println!();
 	println!();

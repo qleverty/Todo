@@ -19,8 +19,13 @@ fn main() {
     match args[1].as_str() {
         "install" => install_update(),
         "rollback" => rollback_update(),
+		"version" => show_version(),
         _ => error_and_wait(&format!("Unknown command: {}", args[1])),
     }
+}
+
+fn show_version() {
+    println!("{}", env!("CARGO_PKG_VERSION"));
 }
 
 #[cfg(windows)]

@@ -41,11 +41,14 @@ enum Command {
     Clear,
     Help,
     Update,
+    Rollback,
 }
 
 fn main() {
     #[cfg(windows)]
     enable_ansi_support();
+    
+    check_update_state();
     
     if let Err(e) = run() {
         print!("\x1b[38;2;255;50;50mError\x1b[0m\x1b[38;2;255;255;255m:\x1b[0m ");
@@ -76,6 +79,7 @@ fn run() -> io::Result<()> {
     
     match cmd {
         Command::Update => return handle_update(),
+        Command::Rollback => return handle_rollback(),
         _ => {}
     }
     
@@ -89,6 +93,7 @@ fn run() -> io::Result<()> {
         Command::Clear => clear_completed(&todo_path)?,
         Command::Help => show_help(),
         Command::Update => unreachable!(),
+		Command::Rollback => unreachable!(),
     }
     
     Ok(())
@@ -144,7 +149,8 @@ fn parse_command(args: &[String]) -> io::Result<Command> {
         "list" | "ls" | "l" if args.len() == 1 => Ok(Command::List),
         "clear" | "clr" if args.len() == 1 => Ok(Command::Clear),
         "help" | "h" if args.len() == 1 => Ok(Command::Help),
-        "update" if args.len() == 1 => Ok(Command::Update),
+        "update" | "u" if args.len() == 1 => Ok(Command::Update),
+        "rollback" | "r" if args.len() == 1 => Ok(Command::Rollback),
         "d" | "do" => {
             if args.len() == 1 {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, "No task ID provided.\nExample: todo d 5"));
@@ -506,9 +512,39 @@ fn handle_update() -> io::Result<()> {
     create_backup()?;
     println!("\r\x1b[K\x1b[38;2;50;200;50mCreating backup... ✓\x1b[0m");
     
-    println!("\x1b[38;2;255;255;255mReady to install. Launching updater... (TODO)\x1b[0m");
+    #[cfg(windows)]
+    let updater_name = "updater.exe";
+    #[cfg(not(windows))]
+    let updater_name = "updater";
     
-    Ok(())
+    let exe_dir = env::current_exe()?
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Cannot find exe directory"))?
+        .to_path_buf();
+    
+    let temp_dir = exe_dir.join("update_temp");
+    let updater_in_temp = temp_dir.join(updater_name);
+    
+    if !updater_in_temp.exists() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, 
+            "Update package is corrupted: updater not found"));
+    }
+    
+    print!("\x1b[38;2;130;130;130mPreparing updater...\x1b[0m");
+    io::stdout().flush()?;
+    
+    let updater_dest = exe_dir.join(updater_name);
+    fs::copy(&updater_in_temp, &updater_dest)?;
+    fs::remove_file(&updater_in_temp)?;
+    
+    println!("\r\x1b[K\x1b[38;2;50;200;50mPreparing updater... ✓\x1b[0m");
+    println!("\x1b[38;2;255;255;255mLaunching updater...\x1b[0m");
+    
+    std::process::Command::new(&updater_dest)
+        .arg("install")
+        .spawn()?;
+    
+    std::process::exit(0);
 }
 
 fn check_for_updates() -> Result<UpdateInfo, String> {
@@ -649,6 +685,58 @@ fn create_backup() -> io::Result<()> {
     }
     
     Ok(())
+}
+
+fn check_update_state() {
+    let exe_dir = match env::current_exe()
+        .and_then(|p| p.parent()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Cannot find exe directory"))
+            .map(|p| p.to_path_buf())) {
+        Ok(dir) => dir,
+        Err(_) => return,
+    };
+    
+    let temp_exists = exe_dir.join("update_temp").exists();
+    let backup_exists = exe_dir.join("update_backup").exists();
+    
+    if temp_exists && backup_exists {
+        eprintln!("\x1b[38;2;255;50;50m⚠ Previous update failed!\x1b[0m");
+        eprintln!("\x1b[38;2;255;255;255mRun '\x1b[38;2;50;200;50mtodo rollback\x1b[0m\x1b[38;2;255;255;255m' to restore previous version.\x1b[0m");
+        eprintln!();
+    }
+}
+
+fn handle_rollback() -> io::Result<()> {
+    let exe_dir = env::current_exe()?
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Cannot find exe directory"))?
+        .to_path_buf();
+    
+    let backup_dir = exe_dir.join("update_backup");
+    
+    if !backup_dir.exists() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, 
+            "No backup found. Nothing to rollback."));
+    }
+    
+    #[cfg(windows)]
+    let updater_name = "updater.exe";
+    #[cfg(not(windows))]
+    let updater_name = "updater";
+    
+    let updater_path = exe_dir.join(updater_name);
+    
+    if !updater_path.exists() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "Updater not found"));
+    }
+    
+    println!("\x1b[38;2;255;255;255mRolling back to previous version...\x1b[0m");
+    
+    std::process::Command::new(&updater_path)
+        .arg("rollback")
+        .spawn()?;
+    
+    std::process::exit(0);
 }
 
 fn show_help() {

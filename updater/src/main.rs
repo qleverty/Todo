@@ -40,6 +40,7 @@ fn enable_ansi_support() {
 }
 
 fn install_update() {
+	println!();
     println!("\x1b[38;2;255;255;255mUpdating TODO...\x1b[0m\n");
     
     thread::sleep(Duration::from_millis(1000));
@@ -157,6 +158,15 @@ fn rollback_update() {
         let filename = entry.file_name();
         let filename_str = filename.to_string_lossy();
         
+        #[cfg(windows)]
+        let updater_name = "updater.exe";
+        #[cfg(not(windows))]
+        let updater_name = "updater";
+        
+        if filename_str == updater_name {
+            continue;
+        }
+        
         print!("\x1b[38;2;130;130;130mRestoring {}\x1b[0m", filename_str);
         io::stdout().flush().ok();
         
@@ -178,8 +188,6 @@ fn rollback_update() {
     println!();
     
     if all_ok {
-        fs::remove_dir_all(&backup_dir).ok();
-        
         let temp_dir = exe_dir.join("update_temp");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir).ok();

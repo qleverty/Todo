@@ -150,8 +150,8 @@ fn parse_command(args: &[String]) -> io::Result<Command> {
         "list" | "ls" | "l" if args.len() == 1 => Ok(Command::List),
         "clear" | "clr" if args.len() == 1 => Ok(Command::Clear),
         "help" | "h" if args.len() == 1 => Ok(Command::Help),
-        "update" | "u" if args.len() == 1 => Ok(Command::Update),
-        "rollback" | "r" if args.len() == 1 => Ok(Command::Rollback),
+		"update" if args.len() == 1 => Ok(Command::Update),
+		"rollback" if args.len() == 1 => Ok(Command::Rollback),
 		"edit" | "e" => {
 			if args.len() < 2 {
 				return Err(io::Error::new(io::ErrorKind::InvalidInput, "No task ID provided."));
@@ -621,7 +621,7 @@ fn handle_update() -> io::Result<()> {
     }
 }
 
-fn check_for_update() -> Result<UpdateInfo, String> {
+fn check_for_update() -> Result<Option<UpdateInfo>, String> {
     let current_version = env!("CARGO_PKG_VERSION").to_string();
     
     let client = reqwest::blocking::Client::builder()
@@ -653,7 +653,7 @@ fn check_for_update() -> Result<UpdateInfo, String> {
     let latest_version = release.tag_name.trim_start_matches('v').to_string();
     
     if current_version == latest_version {
-        return Err("Already on latest version".to_string());
+        return Ok(None);
     }
     
     let asset_name = format!("todo-v{}-win64.zip", latest_version);
@@ -661,11 +661,11 @@ fn check_for_update() -> Result<UpdateInfo, String> {
         .find(|a| a.name == asset_name)
         .ok_or_else(|| format!("Release asset '{}' not found", asset_name))?;
     
-    Ok(UpdateInfo {
+    Ok(Some(UpdateInfo {
         current_version,
         latest_version,
         download_url: asset.browser_download_url.clone(),
-    })
+    }))
 }
 
 fn download_update(url: &str) -> io::Result<Vec<u8>> {
@@ -854,8 +854,8 @@ fn show_help() {
     println!();
     println!("\x1b[38;2;255;255;255mOTHER:\x1b[0m");
     println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mclear\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mclr\x1b[0m\x1b[38;2;210;210;210m     → remove all completed tasks\x1b[0m");
-    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mupdate\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mu\x1b[0m\x1b[38;2;210;210;210m      → check for updates\x1b[0m");
-    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mrollback\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mr\x1b[0m\x1b[38;2;210;210;210m    → restore previous version\x1b[0m");
+	println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mupdate\x1b[0m\x1b[38;2;210;210;210m         → check for updates\x1b[0m");
+	println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mrollback\x1b[0m\x1b[38;2;210;210;210m       → restore previous version\x1b[0m");
     println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mhelp\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mh\x1b[0m\x1b[38;2;210;210;210m        → show this help\x1b[0m");
     println!();
     println!();

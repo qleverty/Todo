@@ -652,20 +652,20 @@ fn check_for_update() -> Result<Option<UpdateInfo>, String> {
     
     let latest_version = release.tag_name.trim_start_matches('v').to_string();
     
-    if current_version == latest_version {
-        return Ok(None);
-    }
+	if current_version == latest_version {
+		return Ok(None);
+	}
     
     let asset_name = format!("todo-v{}-win64.zip", latest_version);
     let asset = release.assets.iter()
         .find(|a| a.name == asset_name)
         .ok_or_else(|| format!("Release asset '{}' not found", asset_name))?;
     
-    Ok(Some(UpdateInfo {
-        current_version,
-        latest_version,
-        download_url: asset.browser_download_url.clone(),
-    }))
+	Ok(Some(UpdateInfo {
+		current_version,
+		latest_version,
+		download_url: asset.browser_download_url.clone(),
+	}))
 }
 
 fn download_update(url: &str) -> io::Result<Vec<u8>> {

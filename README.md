@@ -52,6 +52,14 @@ todo delete 5      # or del
 todo del 1-3 8     # ranges work here too
 ```
 
+### Edit a task
+```bash
+todo edit 3 B new text    # change priority and text
+todo e 3 B                # change only priority
+todo e 3 new text         # remove priority, change text
+todo e 3 -                # remove priority only
+```
+
 ### Remove completed tasks
 
 ```bash

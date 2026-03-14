@@ -304,7 +304,7 @@ fn add_task(path: &PathBuf, priority: Option<char>, text: String) -> io::Result<
         } else {
             None
         };
-        priority_order(line_priority) > new_priority_order
+        priority_order(line_priority) >= new_priority_order
     }).unwrap_or(lines.len());
     
     lines.insert(insert_pos, task_line);

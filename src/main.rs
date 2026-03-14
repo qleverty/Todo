@@ -152,28 +152,25 @@ fn parse_command(args: &[String]) -> io::Result<Command> {
         "help" | "h" if args.len() == 1 => Ok(Command::Help),
         "update" | "u" if args.len() == 1 => Ok(Command::Update),
         "rollback" | "r" if args.len() == 1 => Ok(Command::Rollback),
-        "edit" | "e" => {
-            if args.len() < 2 {
-                return Err(io::Error::new(io::ErrorKind::InvalidInput, "No task ID provided.\nExample: todo edit 5 B new text"));
-            }
-            let id = args[1].parse().map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid task ID"))?;
-            
-            if args.len() == 2 {
-                return Ok(Command::Edit(id, None, None));
-            }
-            
-            let first = &args[2];
-            if first.len() == 1 && matches!(first.to_uppercase().as_str(), "A" | "B" | "C") {
-                let p = first.to_uppercase().chars().next();
-                if args.len() == 3 {
-                    Ok(Command::Edit(id, p, None))
-                } else {
-                    Ok(Command::Edit(id, p, Some(args[3..].join(" "))))
-                }
-            } else {
-                Ok(Command::Edit(id, None, Some(args[2..].join(" "))))
-            }
-        },
+		"edit" | "e" => {
+			if args.len() < 2 {
+				return Err(io::Error::new(io::ErrorKind::InvalidInput, "No task ID provided."));
+			}
+			let id = args[1].parse().map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid task ID"))?;
+			if args.len() == 2 {
+				return Err(io::Error::new(io::ErrorKind::InvalidInput, "No parameters provided.\nExample: todo edit 5 B new text"));
+			}
+			let first = &args[2];
+			let (priority, text_start) = if first == "-" {
+				(None, 3)
+			} else if first.len() == 1 && matches!(first.to_uppercase().as_str(), "A" | "B" | "C") {
+				(first.to_uppercase().chars().next(), 3)
+			} else {
+				(None, 2)
+			};
+			let text = if args.len() > text_start { Some(args[text_start..].join(" ")) } else { None };
+			Ok(Command::Edit(id, priority, text))
+		},
         "d" | "do" => {
             if args.len() == 1 {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, "No task ID provided.\nExample: todo d 5"));
@@ -496,11 +493,11 @@ fn delete_task(path: &PathBuf, ids: Vec<usize>) -> io::Result<()> {
 fn edit_task(path: &PathBuf, id: usize, new_priority: Option<char>, new_text: Option<String>) -> io::Result<()> {
     let tasks = read_tasks(path)?;
     let task = tasks.iter().find(|t| t.id == id)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("Task #{} not found", id)))?;
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("Task №{} not found", id)))?;
     
     let (old_p, old_t) = (task.priority, task.text.clone());
-    let final_p = if new_text.is_some() { new_priority } else { new_priority.or(old_p) };
-    let final_t = new_text.as_ref().unwrap_or(&old_t);
+	let final_p = new_priority;
+	let final_t = new_text.as_ref().unwrap_or(&old_t);
     
     let lines: Vec<String> = fs::read_to_string(path)?
         .lines()
@@ -520,18 +517,23 @@ fn edit_task(path: &PathBuf, id: usize, new_priority: Option<char>, new_text: Op
     
     fs::write(path, lines.join("\n") + "\n")?;
     
-    let fmt_p = |p: Option<char>| match p {
-        Some(c) => format!("[{}]", c),
-        None => "[-]".to_string(),
-    };
-    
-    print!("\x1b[38;2;50;200;50mEdited\x1b[0m\x1b[38;2;255;255;255m:\x1b[0m ");
-    
-    if new_text.is_none() {
-        println!("\x1b[38;2;255;255;255mNo{} priority: {} → {}\x1b[0m", id, fmt_p(old_p), fmt_p(final_p));
-    } else {
-        println!("\x1b[38;2;255;255;255mNo{}: {} \"{}\" → {} \"{}\"\x1b[0m", id, fmt_p(old_p), old_t, fmt_p(final_p), final_t);
-    }
+	let fmt_p = |p: Option<char>| match p {
+		Some('A') => format!("\x1b[38;2;255;50;50m[A]\x1b[0m"),
+		Some('B') => format!("\x1b[38;2;255;200;0m[B]\x1b[0m"),
+		Some('C') => format!("\x1b[38;2;50;200;50m[C]\x1b[0m"),
+		_ => format!("\x1b[38;2;130;130;130m[-]\x1b[0m"),
+	};
+
+	let text_color = |p: Option<char>| if p.is_some() { "\x1b[38;2;255;255;255m" } else { "\x1b[38;2;210;210;210m" };
+
+	print!("\x1b[38;2;50;200;50mEdited\x1b[0m\x1b[38;2;255;255;255m:\x1b[0m ");
+
+	if new_text.is_none() {
+		println!("\x1b[38;2;255;255;255m№{} priority:\x1b[0m {} \x1b[38;2;255;255;255m→\x1b[0m {}", id, fmt_p(old_p), fmt_p(final_p));
+	} else {
+		println!("\x1b[38;2;255;255;255m№{}:\x1b[0m {} {}\"{}\"\x1b[0m \x1b[38;2;255;255;255m→\x1b[0m {} {}\"{}\"", 
+			id, fmt_p(old_p), text_color(old_p), old_t, fmt_p(final_p), text_color(final_p), final_t);
+	}
     
     Ok(())
 }
@@ -828,14 +830,6 @@ fn show_help() {
     println!("\x1b[38;2;255;255;255mVIEW TASKS:\x1b[0m");
     println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mlist\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mls\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255ml\x1b[0m\x1b[38;2;210;210;210m      → show all tasks\x1b[0m");
     println!();
-    println!("\x1b[38;2;255;255;255mEDIT TASKS:\x1b[0m");
-    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255medit\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255me\x1b[0m\x1b[38;2;210;210;210m <id> [priority] [text] → edit task\x1b[0m");
-    println!("  \x1b[38;2;210;210;210mExamples:\x1b[0m");
-    println!("    \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255me\x1b[0m\x1b[38;2;210;210;210m 5 B new text → change priority to B and text\x1b[0m");
-    println!("    \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255me\x1b[0m\x1b[38;2;210;210;210m 5 B          → change only priority to B\x1b[0m");
-    println!("    \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255me\x1b[0m\x1b[38;2;210;210;210m 5 new text   → remove priority and change text\x1b[0m");
-    println!("    \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255me\x1b[0m\x1b[38;2;210;210;210m 5            → remove priority\x1b[0m");
-    println!();
     println!("\x1b[38;2;255;255;255mCOMPLETE TASKS:\x1b[0m");
     println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mdo\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255md\x1b[0m\x1b[38;2;210;210;210m <id|range>... → mark task(s) as completed\x1b[0m");
     println!("  \x1b[38;2;210;210;210mExamples:\x1b[0m");
@@ -849,6 +843,14 @@ fn show_help() {
     println!("  \x1b[38;2;210;210;210mExamples:\x1b[0m");
     println!("    \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mdelete\x1b[0m\x1b[38;2;210;210;210m 5     → delete task №5\x1b[0m");
     println!("    \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mdelete\x1b[0m\x1b[38;2;210;210;210m 1-3 8 → delete tasks №1, №2, №3, №8\x1b[0m");
+	println!();
+    println!("\x1b[38;2;255;255;255mEDIT TASKS:\x1b[0m");
+    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255medit\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255me\x1b[0m\x1b[38;2;210;210;210m <id> [priority] [text] → edit task\x1b[0m");
+    println!("  \x1b[38;2;210;210;210mExamples:\x1b[0m");
+    println!("    \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255medit\x1b[0m\x1b[38;2;210;210;210m 5 B new text  → change priority to B and text\x1b[0m");
+    println!("    \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255medit\x1b[0m\x1b[38;2;210;210;210m 5 B           → change only priority to B\x1b[0m");
+    println!("    \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255medit\x1b[0m\x1b[38;2;210;210;210m 5 new text    → remove priority and change text\x1b[0m");
+    println!("    \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255medit\x1b[0m\x1b[38;2;210;210;210m 5             → remove priority\x1b[0m");
     println!();
     println!("\x1b[38;2;255;255;255mOTHER:\x1b[0m");
     println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mclear\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mclr\x1b[0m\x1b[38;2;210;210;210m     → remove all completed tasks\x1b[0m");

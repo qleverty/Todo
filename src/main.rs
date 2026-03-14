@@ -1,7 +1,7 @@
 use std::env;
 use std::fs;
 use std::io;
-use std::io::{Write, Cursor};
+use std::io::Cursor;
 use std::path::PathBuf;
 use std::collections::HashSet;
 use std::time::Duration;
@@ -38,6 +38,7 @@ enum Command {
     List,
     Complete(Vec<usize>),
     Delete(Vec<usize>),
+    Edit(usize, Option<char>, Option<String>),
     Clear,
     Help,
     Update,
@@ -90,10 +91,10 @@ fn run() -> io::Result<()> {
         Command::List => list_tasks(&todo_path)?,
         Command::Complete(id) => complete_task(&todo_path, id)?,
         Command::Delete(id) => delete_task(&todo_path, id)?,
+        Command::Edit(id, priority, text) => edit_task(&todo_path, id, priority, text)?,
         Command::Clear => clear_completed(&todo_path)?,
         Command::Help => show_help(),
-        Command::Update => unreachable!(),
-		Command::Rollback => unreachable!(),
+        Command::Update | Command::Rollback => unreachable!(),
     }
     
     Ok(())
@@ -151,6 +152,28 @@ fn parse_command(args: &[String]) -> io::Result<Command> {
         "help" | "h" if args.len() == 1 => Ok(Command::Help),
         "update" | "u" if args.len() == 1 => Ok(Command::Update),
         "rollback" | "r" if args.len() == 1 => Ok(Command::Rollback),
+        "edit" | "e" => {
+            if args.len() < 2 {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "No task ID provided.\nExample: todo edit 5 B new text"));
+            }
+            let id = args[1].parse().map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid task ID"))?;
+            
+            if args.len() == 2 {
+                return Ok(Command::Edit(id, None, None));
+            }
+            
+            let first = &args[2];
+            if first.len() == 1 && matches!(first.to_uppercase().as_str(), "A" | "B" | "C") {
+                let p = first.to_uppercase().chars().next();
+                if args.len() == 3 {
+                    Ok(Command::Edit(id, p, None))
+                } else {
+                    Ok(Command::Edit(id, p, Some(args[3..].join(" "))))
+                }
+            } else {
+                Ok(Command::Edit(id, None, Some(args[2..].join(" "))))
+            }
+        },
         "d" | "do" => {
             if args.len() == 1 {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, "No task ID provided.\nExample: todo d 5"));
@@ -470,6 +493,49 @@ fn delete_task(path: &PathBuf, ids: Vec<usize>) -> io::Result<()> {
     Ok(())
 }
 
+fn edit_task(path: &PathBuf, id: usize, new_priority: Option<char>, new_text: Option<String>) -> io::Result<()> {
+    let tasks = read_tasks(path)?;
+    let task = tasks.iter().find(|t| t.id == id)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("Task #{} not found", id)))?;
+    
+    let (old_p, old_t) = (task.priority, task.text.clone());
+    let final_p = if new_text.is_some() { new_priority } else { new_priority.or(old_p) };
+    let final_t = new_text.as_ref().unwrap_or(&old_t);
+    
+    let lines: Vec<String> = fs::read_to_string(path)?
+        .lines()
+        .enumerate()
+        .filter_map(|(idx, line)| {
+            let line = line.trim();
+            if line.is_empty() { return None; }
+            if idx + 1 != id { return Some(line.to_string()); }
+            
+            let prefix = if task.completed { "x " } else { "" };
+            Some(match final_p {
+                Some(p) => format!("{}({}) {}", prefix, p, final_t),
+                None => format!("{}{}", prefix, final_t),
+            })
+        })
+        .collect();
+    
+    fs::write(path, lines.join("\n") + "\n")?;
+    
+    let fmt_p = |p: Option<char>| match p {
+        Some(c) => format!("[{}]", c),
+        None => "[-]".to_string(),
+    };
+    
+    print!("\x1b[38;2;50;200;50mEdited\x1b[0m\x1b[38;2;255;255;255m:\x1b[0m ");
+    
+    if new_text.is_none() {
+        println!("\x1b[38;2;255;255;255mNo{} priority: {} → {}\x1b[0m", id, fmt_p(old_p), fmt_p(final_p));
+    } else {
+        println!("\x1b[38;2;255;255;255mNo{}: {} \"{}\" → {} \"{}\"\x1b[0m", id, fmt_p(old_p), old_t, fmt_p(final_p), final_t);
+    }
+    
+    Ok(())
+}
+
 fn clear_completed(path: &PathBuf) -> io::Result<()> {
     if !path.exists() {
         println!("\x1b[38;2;50;200;50mCleared\x1b[0m\x1b[38;2;255;255;255m: 0 tasks were deleted\x1b[0m");
@@ -478,113 +544,96 @@ fn clear_completed(path: &PathBuf) -> io::Result<()> {
     
     let content = fs::read_to_string(path)?;
     let lines: Vec<&str> = content.lines().collect();
-    let completed_count = lines.iter().filter(|l| l.trim().starts_with("x ")).count();
     
-    let active: Vec<String> = lines.iter()
-        .filter(|l| !l.trim().is_empty() && !l.trim().starts_with("x "))
-        .map(|s| s.to_string())
+    let completed_count = lines.iter()
+        .filter(|line| !line.trim().is_empty() && line.trim().starts_with("x "))
+        .count();
+    
+    if completed_count == 0 {
+        println!("\x1b[38;2;50;200;50mCleared\x1b[0m\x1b[38;2;255;255;255m: 0 tasks were deleted\x1b[0m");
+        return Ok(());
+    }
+    
+    let filtered: Vec<String> = lines.iter()
+        .filter_map(|&line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with("x ") {
+                None
+            } else {
+                Some(line.to_string())
+            }
+        })
         .collect();
     
-    fs::write(path, active.join("\n") + "\n")?;
+    fs::write(path, filtered.join("\n") + "\n")?;
     println!("\x1b[38;2;50;200;50mCleared\x1b[0m\x1b[38;2;255;255;255m: {} tasks were deleted\x1b[0m", completed_count);
     Ok(())
 }
 
 fn handle_update() -> io::Result<()> {
-    print!("\x1b[38;2;130;130;130mChecking for updates...\x1b[0m");
-    io::stdout().flush()?;
+    println!("\x1b[38;2;255;255;255mChecking for updates...\x1b[0m");
     
-    let update_info = match check_for_updates() {
-        Ok(info) => info,
-        Err(e) if e == "Already on latest version" => {
-            println!("\r\x1b[K\x1b[38;2;50;200;50mAlready on latest version\x1b[0m");
-            return Ok(());
+    match check_for_update() {
+        Ok(info) => {
+            println!("\x1b[38;2;50;200;50mNew version available!\x1b[0m");
+            println!("\x1b[38;2;255;255;255mCurrent: v{}\x1b[0m", info.current_version);
+            println!("\x1b[38;2;255;255;255mLatest: v{}\x1b[0m", info.latest_version);
+            println!();
+            println!("\x1b[38;2;255;255;255mDownloading update...\x1b[0m");
+            
+            let zip_data = download_update(&info.download_url)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            
+            println!("\x1b[38;2;255;255;255mExtracting...\x1b[0m");
+            extract_update(&zip_data)?;
+            
+            println!("\x1b[38;2;255;255;255mCreating backup...\x1b[0m");
+            create_backup()?;
+            
+            let exe_dir = env::current_exe()?
+                .parent()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Cannot find exe directory"))?
+                .to_path_buf();
+            
+            #[cfg(windows)]
+            let updater_name = "updater.exe";
+            #[cfg(not(windows))]
+            let updater_name = "updater";
+            
+            let updater_path = exe_dir.join(updater_name);
+            
+            if !updater_path.exists() {
+                return Err(io::Error::new(io::ErrorKind::NotFound, "Updater not found in downloaded package"));
+            }
+            
+            println!("\x1b[38;2;255;255;255mInstalling update...\x1b[0m");
+            
+            std::process::Command::new(&updater_path)
+                .spawn()?;
+            
+            std::process::exit(0);
         }
         Err(e) => {
-            println!();
             return Err(io::Error::new(io::ErrorKind::Other, e));
         }
-    };
-    
-    println!("\r\x1b[K\x1b[38;2;50;200;50mUpdate available\x1b[0m\x1b[38;2;255;255;255m: v{} → v{}\x1b[0m", 
-        update_info.current_version, update_info.latest_version);
-    
-    print!("\x1b[38;2;255;255;255mDo you want to install? (Y/N): \x1b[0m");
-    io::stdout().flush()?;
-    
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    
-    if !input.trim().eq_ignore_ascii_case("y") {
-        println!("\x1b[38;2;130;130;130mUpdate cancelled.\x1b[0m");
-        return Ok(());
     }
-    
-    print!("\x1b[38;2;130;130;130mDownloading...\x1b[0m");
-    io::stdout().flush()?;
-    let zip_bytes = download_update(&update_info.download_url)?;
-    println!("\r\x1b[K\x1b[38;2;50;200;50mDownloading... Done\x1b[0m");
-    
-    print!("\x1b[38;2;130;130;130mExtracting...\x1b[0m");
-    io::stdout().flush()?;
-    extract_update(&zip_bytes)?;
-    println!("\r\x1b[K\x1b[38;2;50;200;50mExtracting... Done\x1b[0m");
-    
-    print!("\x1b[38;2;130;130;130mCreating backup...\x1b[0m");
-    io::stdout().flush()?;
-    create_backup()?;
-    println!("\r\x1b[K\x1b[38;2;50;200;50mCreating backup... Done\x1b[0m");
-    
-    #[cfg(windows)]
-    let updater_name = "updater.exe";
-    #[cfg(not(windows))]
-    let updater_name = "updater";
-    
-    let exe_dir = env::current_exe()?
-        .parent()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Cannot find exe directory"))?
-        .to_path_buf();
-    
-    let temp_dir = exe_dir.join("update_temp");
-    let updater_in_temp = temp_dir.join(updater_name);
-    
-    if !updater_in_temp.exists() {
-        return Err(io::Error::new(io::ErrorKind::NotFound, 
-            "Update package is corrupted: updater not found"));
-    }
-    
-    print!("\x1b[38;2;130;130;130mPreparing updater...\x1b[0m");
-    io::stdout().flush()?;
-    
-    let updater_dest = exe_dir.join(updater_name);
-    fs::copy(&updater_in_temp, &updater_dest)?;
-    fs::remove_file(&updater_in_temp)?;
-    
-    println!("\r\x1b[K\x1b[38;2;50;200;50mPreparing updater... Done\x1b[0m");
-    println!("\x1b[38;2;255;255;255mLaunching updater...\x1b[0m");
-    
-    std::process::Command::new(&updater_dest)
-        .arg("install")
-        .spawn()?;
-    
-    std::process::exit(0);
 }
 
-fn check_for_updates() -> Result<UpdateInfo, String> {
+fn check_for_update() -> Result<UpdateInfo, String> {
     let current_version = env!("CARGO_PKG_VERSION").to_string();
     
     let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(10))
         .user_agent("todo-cli")
+        .timeout(Duration::from_secs(10))
         .build()
-        .map_err(|e| format!("Failed to create client: {}", e))?;
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
     
     let response = client
-        .get("https://api.github.com/repos/qleverty/todo/releases/latest")//.get("http://localhost:6070/repos/qleverty/todo/releases/latest")
+        .get("https://api.github.com/repos/qleverty/todo/releases/latest")
         .send()
         .map_err(|e| {
             if e.is_timeout() {
-                "Connection timeout".to_string()
+                "Request timed out. Check your internet.".to_string()
             } else if e.is_connect() {
                 "Cannot connect to GitHub. Check your internet.".to_string()
             } else {
@@ -779,6 +828,14 @@ fn show_help() {
     println!("\x1b[38;2;255;255;255mVIEW TASKS:\x1b[0m");
     println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mlist\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mls\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255ml\x1b[0m\x1b[38;2;210;210;210m      → show all tasks\x1b[0m");
     println!();
+    println!("\x1b[38;2;255;255;255mEDIT TASKS:\x1b[0m");
+    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255medit\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255me\x1b[0m\x1b[38;2;210;210;210m <id> [priority] [text] → edit task\x1b[0m");
+    println!("  \x1b[38;2;210;210;210mExamples:\x1b[0m");
+    println!("    \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255me\x1b[0m\x1b[38;2;210;210;210m 5 B new text → change priority to B and text\x1b[0m");
+    println!("    \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255me\x1b[0m\x1b[38;2;210;210;210m 5 B          → change only priority to B\x1b[0m");
+    println!("    \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255me\x1b[0m\x1b[38;2;210;210;210m 5 new text   → remove priority and change text\x1b[0m");
+    println!("    \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255me\x1b[0m\x1b[38;2;210;210;210m 5            → remove priority\x1b[0m");
+    println!();
     println!("\x1b[38;2;255;255;255mCOMPLETE TASKS:\x1b[0m");
     println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mdo\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255md\x1b[0m\x1b[38;2;210;210;210m <id|range>... → mark task(s) as completed\x1b[0m");
     println!("  \x1b[38;2;210;210;210mExamples:\x1b[0m");
@@ -795,11 +852,11 @@ fn show_help() {
     println!();
     println!("\x1b[38;2;255;255;255mOTHER:\x1b[0m");
     println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mclear\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mclr\x1b[0m\x1b[38;2;210;210;210m     → remove all completed tasks\x1b[0m");
-println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mupdate\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mu\x1b[0m\x1b[38;2;210;210;210m      → check for updates\x1b[0m");
+    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mupdate\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mu\x1b[0m\x1b[38;2;210;210;210m      → check for updates\x1b[0m");
     println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mrollback\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mr\x1b[0m\x1b[38;2;210;210;210m    → restore previous version\x1b[0m");
     println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mhelp\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mh\x1b[0m\x1b[38;2;210;210;210m        → show this help\x1b[0m");
     println!();
-	println!();
+    println!();
     println!("\x1b[38;2;255;255;255mTO\x1b[38;2;153;229;80mDO\x1b[0m \x1b[38;2;255;255;255mv{}\x1b[0m", env!("CARGO_PKG_VERSION"));
     println!("\x1b[38;2;210;210;210mGitHub: https://github.com/qleverty/todo\x1b[0m");
 }

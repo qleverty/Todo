@@ -150,15 +150,15 @@ fn parse_command(args: &[String]) -> io::Result<Command> {
         "list" | "ls" | "l" if args.len() == 1 => Ok(Command::List),
         "clear" | "clr" if args.len() == 1 => Ok(Command::Clear),
         "help" | "h" if args.len() == 1 => Ok(Command::Help),
-		"update" if args.len() == 1 => Ok(Command::Update),
-		"rollback" if args.len() == 1 => Ok(Command::Rollback),
+        "update" if args.len() == 1 => Ok(Command::Update),
+        "rollback" if args.len() == 1 => Ok(Command::Rollback),
 		"edit" | "e" => {
 			if args.len() < 2 {
 				return Err(io::Error::new(io::ErrorKind::InvalidInput, "No task ID provided."));
 			}
 			let id = args[1].parse().map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid task ID"))?;
 			if args.len() == 2 {
-				return Err(io::Error::new(io::ErrorKind::InvalidInput, "No parameters provided.\nExample: todo edit 5 B new text"));
+				return Ok(Command::Edit(id, None, None));
 			}
 			let first = &args[2];
 			let (priority, text_start) = if first == "-" {
@@ -529,9 +529,9 @@ fn edit_task(path: &PathBuf, id: usize, new_priority: Option<char>, new_text: Op
 	print!("\x1b[38;2;50;200;50mEdited\x1b[0m\x1b[38;2;255;255;255m:\x1b[0m ");
 
 	if new_text.is_none() {
-		println!("\x1b[38;2;255;255;255m№{} priority:\x1b[0m {} \x1b[38;2;255;255;255m→\x1b[0m {}", id, fmt_p(old_p), fmt_p(final_p));
+		println!("\x1b[38;2;255;255;255m№{} priority:\x1b[0m {} \x1b[38;2;210;210;210m→\x1b[0m {}", id, fmt_p(old_p), fmt_p(final_p));
 	} else {
-		println!("\x1b[38;2;255;255;255m№{}:\x1b[0m {} {}\"{}\"\x1b[0m \x1b[38;2;255;255;255m→\x1b[0m {} {}\"{}\"", 
+		println!("\x1b[38;2;255;255;255m№{}:\x1b[0m {} {}\"{}\"\x1b[0m \x1b[38;2;210;210;210m→\x1b[0m {} {}\"{}\"\x1b[0m", 
 			id, fmt_p(old_p), text_color(old_p), old_t, fmt_p(final_p), text_color(final_p), final_t);
 	}
     
@@ -576,7 +576,7 @@ fn handle_update() -> io::Result<()> {
     println!("\x1b[38;2;255;255;255mChecking for updates...\x1b[0m");
     
     match check_for_update() {
-        Ok(info) => {
+        Ok(Some(info)) => {
             println!("\x1b[38;2;50;200;50mNew version available!\x1b[0m");
             println!("\x1b[38;2;255;255;255mCurrent: v{}\x1b[0m", info.current_version);
             println!("\x1b[38;2;255;255;255mLatest: v{}\x1b[0m", info.latest_version);
@@ -615,9 +615,14 @@ fn handle_update() -> io::Result<()> {
             
             std::process::exit(0);
         }
+		Ok(None) => {
+            println!("\x1b[38;2;50;200;50mУже на последней версии (v{}).\x1b[0m", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
         Err(e) => {
             return Err(io::Error::new(io::ErrorKind::Other, e));
         }
+    }
     }
 }
 
@@ -652,9 +657,9 @@ fn check_for_update() -> Result<Option<UpdateInfo>, String> {
     
     let latest_version = release.tag_name.trim_start_matches('v').to_string();
     
-	if current_version == latest_version {
-		return Ok(None);
-	}
+    if current_version == latest_version {
+        return Ok(None);
+    }
     
     let asset_name = format!("todo-v{}-win64.zip", latest_version);
     let asset = release.assets.iter()
@@ -662,10 +667,10 @@ fn check_for_update() -> Result<Option<UpdateInfo>, String> {
         .ok_or_else(|| format!("Release asset '{}' not found", asset_name))?;
     
 	Ok(Some(UpdateInfo {
-		current_version,
-		latest_version,
-		download_url: asset.browser_download_url.clone(),
-	}))
+        current_version,
+        latest_version,
+        download_url: asset.browser_download_url.clone(),
+    }))
 }
 
 fn download_update(url: &str) -> io::Result<Vec<u8>> {
@@ -854,8 +859,8 @@ fn show_help() {
     println!();
     println!("\x1b[38;2;255;255;255mOTHER:\x1b[0m");
     println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mclear\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mclr\x1b[0m\x1b[38;2;210;210;210m     → remove all completed tasks\x1b[0m");
-	println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mupdate\x1b[0m\x1b[38;2;210;210;210m         → check for updates\x1b[0m");
-	println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mrollback\x1b[0m\x1b[38;2;210;210;210m       → restore previous version\x1b[0m");
+    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mupdate\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mu\x1b[0m\x1b[38;2;210;210;210m      → check for updates\x1b[0m");
+    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mrollback\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mr\x1b[0m\x1b[38;2;210;210;210m    → restore previous version\x1b[0m");
     println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mhelp\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mh\x1b[0m\x1b[38;2;210;210;210m        → show this help\x1b[0m");
     println!();
     println!();

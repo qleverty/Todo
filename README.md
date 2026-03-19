@@ -60,6 +60,13 @@ todo e 3 new text         # remove priority, change text
 todo e 3 -                # remove priority only
 ```
 
+### Re-sort tasks
+```bash
+todo resort
+```
+
+If you manually edited `todo.txt` and messed up the order, this command will restore proper priority sorting (A → B → C → no priority). Note that task IDs may change after resorting.
+
 ### Remove completed tasks
 
 ```bash

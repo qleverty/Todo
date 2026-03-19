@@ -43,6 +43,7 @@ enum Command {
     Help,
     Update,
     Rollback,
+    Resort,
 }
 
 fn confirm_action(prompt: &str) -> io::Result<bool> {
@@ -113,6 +114,7 @@ fn run() -> io::Result<()> {
         Command::Clear => clear_completed(&todo_path)?,
         Command::Help => show_help(),
         Command::Update | Command::Rollback => unreachable!(),
+		Command::Resort => resort_tasks(&todo_path)?,
     }
     
     Ok(())
@@ -170,6 +172,7 @@ fn parse_command(args: &[String]) -> io::Result<Command> {
         "help" | "h" if args.len() == 1 => Ok(Command::Help),
         "update" if args.len() == 1 => Ok(Command::Update),
         "rollback" if args.len() == 1 => Ok(Command::Rollback),
+		"resort" if args.len() == 1 => Ok(Command::Resort),
 		"edit" | "e" => {
 			if args.len() < 2 {
 				return Err(io::Error::new(io::ErrorKind::InvalidInput, "No task ID provided."));
@@ -557,6 +560,56 @@ fn edit_task(path: &PathBuf, id: usize, new_priority: Option<char>, new_text: Op
     Ok(())
 }
 
+fn extract_priority(line: &str) -> Option<char> {
+    let line = line.trim();
+    let line = if line.starts_with("x ") && line.len() > 2 {
+        line[2..].trim()
+    } else {
+        line
+    };
+    
+    if line.len() > 3 && line.starts_with('(') && line.chars().nth(2) == Some(')') {
+        line.chars().nth(1).filter(|c| c.is_ascii_alphabetic()).map(|c| c.to_ascii_uppercase())
+    } else {
+        None
+    }
+}
+
+fn resort_tasks(path: &PathBuf) -> io::Result<()> {
+    let content = fs::read_to_string(path)?;
+    let lines: Vec<String> = content.lines()
+        .map(|s| s.to_string())
+        .filter(|l| !l.trim().is_empty())
+        .collect();
+    
+    if lines.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "File empty"));
+    }
+    
+    let mut groups: [Vec<String>; 4] = Default::default();
+    
+    for line in lines.iter() {
+        let index = match extract_priority(line) {
+            Some('A') => 0,
+            Some('B') => 1,
+            Some('C') => 2,
+            _ => 3,
+        };
+        groups[index].push(line.clone());
+    }
+    
+    let sorted: Vec<String> = groups.into_iter().flatten().collect();
+    
+    if sorted == lines {
+        println!("\x1b[38;2;50;200;50mResorted\x1b[0m\x1b[38;2;255;255;255m: File already resorted\x1b[0m");
+        return Ok(());
+    }
+    
+    fs::write(path, sorted.join("\n") + "\n")?;
+    println!("\x1b[38;2;50;200;50mResorted\x1b[0m\x1b[38;2;255;255;255m: Successfully resorted todo.txt file\x1b[0m");
+    Ok(())
+}
+
 fn clear_completed(path: &PathBuf) -> io::Result<()> {
     if !path.exists() {
         println!("\x1b[38;2;50;200;50mCleared\x1b[0m\x1b[38;2;255;255;255m: 0 tasks were deleted\x1b[0m");
@@ -789,32 +842,32 @@ fn create_backup() -> io::Result<()> {
 }
 
 fn check_update_state() {
-    let exe_dir = match env::current_exe()
-        .and_then(|p| p.parent()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Cannot find exe directory"))
-            .map(|p| p.to_path_buf())) {
-        Ok(dir) => dir,
-        Err(_) => return,
-    };
+	// TODO: Show this message only once after update, not on every startup
+    // let exe_dir = match env::current_exe()
+    //     .and_then(|p| p.parent()
+    //         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Cannot find exe directory"))
+    //         .map(|p| p.to_path_buf())) {
+    //     Ok(dir) => dir,
+    //     Err(_) => return,
+    // };
     
-    let temp_exists = exe_dir.join("update_temp").exists();
-    let backup_exists = exe_dir.join("update_backup").exists();
+    // let temp_exists = exe_dir.join("update_temp").exists();
+    // let backup_exists = exe_dir.join("update_backup").exists();
     
-/*     if !temp_exists && backup_exists {
-        println!("\x1b[38;2;50;200;50mSuccessfully updated to v{}!\x1b[0m\n", 
-            env!("CARGO_PKG_VERSION")); */
-	if !confirm_action("Are you sure you want to rollback? (y/n) ")? {
-		return Ok(());
-	}
-    } else if temp_exists && backup_exists {
-        eprintln!("\x1b[38;2;255;50;50m[!] Previous update failed!\x1b[0m");
-        eprintln!("\x1b[38;2;255;255;255mRun '\x1b[38;2;50;200;50mtodo rollback\x1b[0m\x1b[38;2;255;255;255m' to restore previous version.\x1b[0m");
-        eprintln!();
-    } else if temp_exists && !backup_exists {
-        eprintln!("\x1b[38;2;255;200;0m[!] Incomplete update found.\x1b[0m");
-        eprintln!("\x1b[38;2;255;255;255mDelete 'update_temp' manually.\x1b[0m");
-        eprintln!();
-    }
+    // if !temp_exists && backup_exists {
+    //     println!("\x1b[38;2;50;200;50mSuccessfully updated to v{}!\x1b[0m\n", 
+    //         env!("CARGO_PKG_VERSION"));
+    // }
+    
+    // if temp_exists && backup_exists {
+    //     eprintln!("\x1b[38;2;255;50;50m[!] Previous update failed!\x1b[0m");
+    //     eprintln!("\x1b[38;2;255;255;255mRun '\x1b[38;2;50;200;50mtodo rollback\x1b[0m\x1b[38;2;255;255;255m' to restore previous version.\x1b[0m");
+    //     eprintln!();
+    // } else if temp_exists && !backup_exists {
+    //     eprintln!("\x1b[38;2;255;200;0m[!] Incomplete update found.\x1b[0m");
+    //     eprintln!("\x1b[38;2;255;255;255mDelete 'update_temp' manually.\x1b[0m");
+    //     eprintln!();
+    // }
 }
 
 fn handle_rollback() -> io::Result<()> {
@@ -883,10 +936,11 @@ fn show_help() {
     println!("    \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255medit\x1b[0m\x1b[38;2;210;210;210m 5             → remove priority\x1b[0m");
     println!();
     println!("\x1b[38;2;255;255;255mOTHER:\x1b[0m");
-    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mclear\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mclr\x1b[0m\x1b[38;2;210;210;210m     → remove all completed tasks\x1b[0m");
-    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mupdate\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mu\x1b[0m\x1b[38;2;210;210;210m      → check for updates\x1b[0m");
-    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mrollback\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mr\x1b[0m\x1b[38;2;210;210;210m    → restore previous version\x1b[0m");
-    println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mhelp\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mh\x1b[0m\x1b[38;2;210;210;210m        → show this help\x1b[0m");
+	println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mclear\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mclr\x1b[0m\x1b[38;2;210;210;210m     → remove all completed tasks\x1b[0m");
+	println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mresort\x1b[0m\x1b[38;2;210;210;210m        → resort tasks in todo.txt file\x1b[0m");
+	println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mupdate\x1b[0m\x1b[38;2;210;210;210m        → check for updates\x1b[0m");
+	println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mrollback\x1b[0m\x1b[38;2;210;210;210m      → restore previous version\x1b[0m");
+	println!("  \x1b[38;2;210;210;210mtodo \x1b[38;2;255;255;255mhelp\x1b[0m\x1b[38;2;210;210;210m/\x1b[38;2;255;255;255mh\x1b[0m\x1b[38;2;210;210;210m        → show this help\x1b[0m");
     println!();
     println!();
     println!("\x1b[38;2;255;255;255mTO\x1b[38;2;153;229;80mDO\x1b[0m \x1b[38;2;255;255;255mv{}\x1b[0m", env!("CARGO_PKG_VERSION"));

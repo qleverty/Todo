@@ -4,6 +4,7 @@ desktop.ini
 todo.bat
 todo.txt
 Cargo.lock
+updater.exe
 
 updater/debug/
 updater/target/

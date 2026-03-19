@@ -45,6 +45,24 @@ enum Command {
     Rollback,
 }
 
+fn confirm_action(prompt: &str) -> io::Result<bool> {
+    use io::Write;
+    
+    loop {
+        print!("\x1b[38;2;255;255;255m{}\x1b[0m", prompt);
+        io::stdout().flush()?;
+        
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        
+        match input.trim().to_lowercase().as_str() {
+            "y" => return Ok(true),
+            "n" => return Ok(false),
+            _ => continue,
+        }
+    }
+}
+
 fn main() {
     #[cfg(windows)]
     enable_ansi_support();
@@ -340,9 +358,10 @@ fn list_tasks(path: &PathBuf) -> io::Result<()> {
     let mut all_tasks = read_tasks(path)?;
     
     if all_tasks.is_empty() {
-        println!("\x1b[38;2;255;255;255mNo tasks.\x1b[0m");
-        println!("\x1b[38;2;255;255;255mUse`todo help` for commands list\x1b[0m");
-        return Ok(());
+		print!("\x1b[38;2;255;50;50mError\x1b[0m\x1b[38;2;255;255;255m:\x1b[0m ");
+		println!("\x1b[38;2;255;255;255mNo tasks\x1b[0m");
+		println!("\x1b[38;2;210;210;210mUse `todo help` for command list\x1b[0m");
+		return Ok(());
     }
     
     all_tasks.sort_by(|a, b| {
@@ -555,6 +574,10 @@ fn clear_completed(path: &PathBuf) -> io::Result<()> {
         println!("\x1b[38;2;50;200;50mCleared\x1b[0m\x1b[38;2;255;255;255m: 0 tasks were deleted\x1b[0m");
         return Ok(());
     }
+	
+	if !confirm_action("Do you want to install? (y/n) ")? {
+		return Ok(());
+	}
     
     let filtered: Vec<String> = lines.iter()
         .filter_map(|&line| {
@@ -622,7 +645,6 @@ fn handle_update() -> io::Result<()> {
         Err(e) => {
             return Err(io::Error::new(io::ErrorKind::Other, e));
         }
-    }
     }
 }
 
@@ -778,9 +800,12 @@ fn check_update_state() {
     let temp_exists = exe_dir.join("update_temp").exists();
     let backup_exists = exe_dir.join("update_backup").exists();
     
-    if !temp_exists && backup_exists {
+/*     if !temp_exists && backup_exists {
         println!("\x1b[38;2;50;200;50mSuccessfully updated to v{}!\x1b[0m\n", 
-            env!("CARGO_PKG_VERSION"));
+            env!("CARGO_PKG_VERSION")); */
+	if !confirm_action("Are you sure you want to rollback? (y/n) ")? {
+		return Ok(());
+	}
     } else if temp_exists && backup_exists {
         eprintln!("\x1b[38;2;255;50;50m[!] Previous update failed!\x1b[0m");
         eprintln!("\x1b[38;2;255;255;255mRun '\x1b[38;2;50;200;50mtodo rollback\x1b[0m\x1b[38;2;255;255;255m' to restore previous version.\x1b[0m");

@@ -49,18 +49,15 @@ enum Command {
 fn confirm_action(prompt: &str) -> io::Result<bool> {
     use io::Write;
     
-    loop {
-        print!("\x1b[38;2;255;255;255m{}\x1b[0m", prompt);
-        io::stdout().flush()?;
-        
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        
-        match input.trim().to_lowercase().as_str() {
-            "y" => return Ok(true),
-            "n" => return Ok(false),
-            _ => continue,
-        }
+    print!("\x1b[38;2;255;255;255m{}\x1b[0m", prompt);
+    io::stdout().flush()?;
+    
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    
+    match input.trim().to_lowercase().as_str() {
+        "yes" | "y" | "да" | "д" => Ok(true),
+        _ => Ok(false),
     }
 }
 
@@ -657,6 +654,11 @@ fn handle_update() -> io::Result<()> {
             println!("\x1b[38;2;255;255;255mCurrent: v{}\x1b[0m", info.current_version);
             println!("\x1b[38;2;255;255;255mLatest: v{}\x1b[0m", info.latest_version);
             println!();
+            
+            if !confirm_action("Do you want to install? (y/n) ")? {
+                return Ok(());
+            }
+            
             println!("\x1b[38;2;255;255;255mDownloading update...\x1b[0m");
             
             let zip_data = download_update(&info.download_url)
@@ -881,6 +883,10 @@ fn handle_rollback() -> io::Result<()> {
     if !backup_dir.exists() {
         return Err(io::Error::new(io::ErrorKind::NotFound, 
             "No backup found. Nothing to rollback."));
+    }
+    
+    if !confirm_action("Are you sure you want to rollback to previous version? (y/n) ")? {
+        return Ok(());
     }
     
     #[cfg(windows)]
